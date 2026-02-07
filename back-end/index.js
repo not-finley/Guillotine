@@ -1,3 +1,4 @@
+console.log("BOOTING UP...")
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -8,7 +9,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { 
   cors: { 
-    origin: process.env.FRONTEND_URL || "http://localhost:5173", // Use env variable in prod
+    origin: ["https://guillotine.vercel.app", "http://localhost:5173"],
     methods: ["GET", "POST"]
   } 
 });
