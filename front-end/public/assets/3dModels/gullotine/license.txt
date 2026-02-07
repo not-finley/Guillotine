@@ -1,0 +1,11 @@
+Model Information:
+* title:	Gullotine
+* source:	https://sketchfab.com/3d-models/gullotine-3d2599ac476f4c3491e077bd63cecd1d
+* author:	PlanetEmily (https://sketchfab.com/PlanetEmily)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Gullotine" (https://sketchfab.com/3d-models/gullotine-3d2599ac476f4c3491e077bd63cecd1d) by PlanetEmily (https://sketchfab.com/PlanetEmily) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
