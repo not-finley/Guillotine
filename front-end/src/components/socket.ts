@@ -1,9 +1,9 @@
 import { io, Socket } from "socket.io-client";
 
-const URL = "http://localhost:3001";
 
+const SOCKET_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
 
-const socket: Socket = io(URL, {
+const socket: Socket = io(SOCKET_URL, {
     transports: ["websocket"],
 });
 

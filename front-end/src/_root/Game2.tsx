@@ -70,7 +70,7 @@ const Game2 = () => {
     };
 
     return (
-        <div className="min-h-screen bg-[#1a1a1a] text-white font-mono p-4 md:p-8 overflow-hidden">
+        <div className="h-screen w-screen bg-[#1f1f1f] text-white font-mono flex flex-col overflow-hidden">
             
             {/* Top Bar: Opponents Scoreboard */}
             <div className="flex justify-between items-start mb-8">
@@ -95,38 +95,58 @@ const Game2 = () => {
             </div>
 
             {/* Main Game Area */}
-            <div className="relative flex flex-col items-center">
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 -rotate-90 origin-left hidden md:block">
-                    <div className="text-6xl font-black text-gray-700 tracking-tighter opacity-10 uppercase">Guillotine</div>
+            <div className="relative flex flex-col items-center w-full">
+                {/* Background Title */}
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 -rotate-90 origin-left hidden lg:block">
+                    <div className="text-6xl font-black text-gray-400 tracking-tighter opacity-10 uppercase select-none">
+                        Guillotine
+                    </div>
                 </div>
 
-                {/* The Line-Up */}
-                <div className="flex gap-2 items-center justify-start w-full overflow-x-auto pb-12 pt-10 px-10 no-scrollbar">
-                    {gameState.lineUp.map((head: any, i: number) => (
-                        <div
-                            key={head.instanceId}
-                            onClick={() => i === 0 && isMyTurn ? handleExecute() : setFocusCard(head)}
-                            className={`
-                                relative flex-shrink-0 w-32 h-48 rounded-xl cursor-pointer transition-all duration-300
-                                ${i === 0 && isMyTurn ? 'scale-110 border-4 border-yellow-400 z-20 shadow-[0_0_40px_rgba(250,204,21,0.6)]' : 'hover:-translate-y-4 z-10'}
-                            `}
-                        >
-                            {/* Card Image */}
-                            <img 
-                                src={`/assets/cards/images/${head.key}.jpeg`} 
-                                alt={head.name}
-                                className="w-full h-full object-cover rounded-xl shadow-lg"
-                                onError={(e) => {
-                                    e.currentTarget.src = "/assets/cards/card-back.png";
+                {/* The Container: Centered and Responsive */}
+                <div className="flex items-center justify-center w-full max-w-7xl h-[300px] px-4">
+                    
+                    {/* The Card Wrapper: This uses negative spacing to bunch cards up */}
+                    <div className="flex items-center justify-center -space-x-16 sm:-space-x-12 md:space-x-2 lg:space-x-4 transition-all duration-500">
+                        {gameState.lineUp.map((head: any, i: number) => (
+                            <div
+                                key={head.instanceId}
+                                onClick={() => i === 0 && isMyTurn ? handleExecute() : setFocusCard(head)}
+                                className={`
+                                     relative flex-shrink-0 w-28 h-40 sm:w-32 sm:h-48 rounded-xl cursor-pointer transition-all duration-300 ease-out
+                                    
+                                    /* Expansion Logic: When hovering a bunched card, push neighbors aside and pop up */
+                                    hover:mx-10 sm:hover:mx-12 md:hover:mx-2 
+                                    hover:-translate-y-8 hover:z-50 hover:scale-110
+                                    
+                                    /* Special Styling for the first card (The Target) */
+                                    ${i === 0 && isMyTurn 
+                                        ? 'z-40 border-4 border-yellow-400 shadow-[0_0_40px_rgba(250,204,21,0.6)] scale-105' 
+                                        : 'z-10 shadow-xl'}
+                                `}
+                                style={{
+                                    /* Slight rotation for that organic card-game feel */
+                                    transform: i === 0 && isMyTurn ? 'none' : `rotate(${(i % 2 === 0 ? 1 : -1) * 2}deg)`,
                                 }}
-                            />
-                            
-                            {/* Overlay Value (Optional - if the value is already on your card art) */}
-                            {/* <div className="absolute top-2 left-2 bg-black/50 px-2 rounded font-black text-xl">
-                                {head.value}
-                            </div> */}
-                        </div>
-                    ))}
+                            >
+                                {/* Next Indicator for the first card */}
+                                {i === 0 && (
+                                    <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-yellow-400 text-black px-3 py-1 text-[10px] font-black rounded-full animate-bounce z-50 shadow-md">
+                                        NEXT
+                                    </div>
+                                )}
+
+                                <img 
+                                    src={`/assets/cards/images/${head.key}.jpeg`} 
+                                    alt={head.name}
+                                    className="w-full h-full object-cover rounded-xl shadow-inner border border-white/10 brightness-110"
+                                    onError={(e) => {
+                                        e.currentTarget.src = "/assets/cards/card-back.png";
+                                    }}
+                                />
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
 
@@ -134,7 +154,7 @@ const Game2 = () => {
             <div className="fixed bottom-0 left-0 w-full p-6 flex justify-between items-end bg-gradient-to-t from-black/80 to-transparent">
                 {/* Your Collection (Score Pile) grouped by Color */}
                 <div className="flex flex-col gap-2">
-                    <p className="text-[10px] uppercase font-bold text-gray-500">Collection</p>
+                    <p className="text-[14px] uppercase font-bold text-gray-500">Collection</p>
                     <div className="flex gap-6 items-end">
                         {groupedCollection && Object.entries(groupedCollection).map(([color, heads]: [string, any]) => (
                             <div key={color} className="relative group flex flex-col items-center">
@@ -146,7 +166,7 @@ const Game2 = () => {
                                             src={`/assets/cards/images/${head.key}.jpeg`} 
                                             onClick={() => setFocusCard(head)}
                                             className={`
-                                                w-20 h-28 rounded-lg border border-white/20 shadow-2xl 
+                                                  w-24 h-34 rounded-lg border border-white/20 shadow-2xl brightness-110
                                                 transform transition-all duration-300
                                                 hover:-translate-y-8 hover:z-50
                                                 ${BALATRO_PALETTE[color]}
@@ -160,7 +180,7 @@ const Game2 = () => {
                                     ))}
                                 </div>
                                 {/* Color Label */}
-                                <span className="mt-2 text-[8px] uppercase font-black opacity-0 group-hover:opacity-100 transition-opacity text-gray-400">
+                                <span className="mt-2 text-[12px] uppercase font-black opacity-0 group-hover:opacity-100 transition-opacity text-gray-400">
                                     {color} ({heads.length})
                                 </span>
                             </div>
@@ -171,13 +191,37 @@ const Game2 = () => {
                 {/* Game Information & Action Card Draw Pile */}
                 <div className="flex flex-col items-end gap-4">
                     {isMyTurn && <div className="bg-red-600 px-4 py-2 text-xl font-black italic skew-x-[-12deg] shadow-lg animate-pulse">YOUR TURN</div>}
-                    <div className="flex gap-4">
-                        <div className="w-24 h-36 bg-blue-900 rounded-xl border-2 border-blue-400 flex flex-col items-center justify-center shadow-[6px_6px_0px_#1e3a8a] relative overflow-hidden group">
-                            <div className="absolute inset-0 bg-white/5 group-hover:bg-white/10 transition-colors"></div>
-                            <span className="rotate-90 font-black text-blue-400 text-xs tracking-widest">ACTIONS</span>
-                            <span className="mt-2 text-[10px] text-blue-300">{gameState.actionDeckCount || '??'}</span>
-                        </div>
-                    </div>
+                    <div className="flex -space-x-12 hover:-space-x-2 transition-all duration-500">
+        {me?.hand?.map((card: any) => (
+            <div
+                key={card.instanceId}
+                className="relative group cursor-pointer"
+                onClick={() => setFocusCard(card)} // Reuse your modal to see card details
+            >
+                <img 
+                    src={`/assets/cards/images/${card.key}.jpeg`} 
+                    className="w-24 h-36 rounded-xl border-2 border-white/20 shadow-2xl transition-transform hover:-translate-y-12 hover:scale-110"
+                />
+                
+                {/* Play Button Overlay */}
+                {isMyTurn && (
+                    <button 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            // Example: Send roomCode and the specific card
+                            socket.emit("play-action-card", { 
+                                roomCode, 
+                                cardInstanceId: card.instanceId 
+                            });
+                        }}
+                        className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity font-bold"
+                    >
+                        PLAY
+                    </button>
+                )}
+            </div>
+        ))}
+    </div>
                 </div>
             </div>
 
@@ -190,7 +234,7 @@ const Game2 = () => {
                     <img 
                         src={`/assets/cards/images/${focusCard.key}.jpeg`} 
                         alt={focusCard.name}
-                        className="asspect-[4/5] object-cover rounded-xl shadow-lg"
+                        className="aspect-[5/7] object-cover rounded-xl shadow-lg brightness-110"
                         onError={(e) => {
                             e.currentTarget.src = "/assets/cards/card-back.png";
                         }}

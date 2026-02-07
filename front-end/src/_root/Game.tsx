@@ -101,8 +101,7 @@ const Game = () => {
       { id: "2323", nickname: "caite"}
     ]);
 
-    const currentPlayerID = "2";
-
+    console.log(players)
 
     useEffect(() => {
       socket.on("update-players", (updatedPlayers) => {

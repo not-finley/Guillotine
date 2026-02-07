@@ -31,7 +31,7 @@ const Room = () => {
 
   useEffect(() => {
   // Listen for the state update instead of just 'start-game'
-    socket.on("game-state-update", (initialState) => {
+    socket.on("game-state-update", () => {
       console.log("Game state received, transitioning...");
       // We pass the nickname in state as a backup to localStorage
       navigate(`/game/${roomCode}`, { state: { nickname } });
