@@ -1,229 +1,202 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
+import socket from "../components/socket";
+import { useParams, useLocation } from "react-router-dom";
 
-enum Colour {
-    Red, 
-    Purple, 
-    Black, 
-    Green, 
-    Blue,
-    None
-}
-
-interface Head {
-    name: string; 
-    value: Number;
-    desc: string;
-    colour: Colour;
-}
-
-interface Player {
-    id: string;
-    nickname: string;
-    points: number;
-    heads: Head[];
-}
-  
+// Matching your JSON color keys
+const BALATRO_PALETTE: Record<string, string> = {
+    violet: "bg-[#7d5ba6] border-[#5a3d7c]", 
+    blue: "bg-[#4a90e2] border-[#2d5a8e]",   
+    green: "bg-[#7db13c] border-[#567a29]",  
+    red: "bg-[#e74c3c] border-[#962d22]",    
+    gray: "bg-[#95a5a6] border-[#7f8c8d]",   
+};
 
 const Game2 = () => {
-    const [focusCardUrl, setFocusCardUrl] = useState("");
-    const [focus, setFocus] = useState(false);
-    const [playerMapID, setplayerMapID] = useState(-1);
-    const [playerMap, setplayerMap] = useState(false);
-    const nums = [1, 2, 3, 4, 5];
+    const [gameState, setGameState] = useState<any>(null);
+    const location = useLocation();
+    const { roomCode } = useParams<{ roomCode: string }>();
+    const [focusCard, setFocusCard] = useState<any>(null);
 
-    const Heads = [
-        {name: "Archbishop", value:4, desc: "", colour: Colour.Blue}, 
-        {name: "Baron", value:3, desc: "", colour: Colour.Purple},
-        {name: "Captain of the Guard", value:3, desc: "Add another noble to the end of the line after you collect this noble.", colour: Colour.Red},
-        {name: "Martyr", value:-1, desc: "", colour: Colour.Black},
-        {name: "Mayor", value:3, desc: "", colour: Colour.Green},
-        {name: "Noble", value:2, desc: "", colour: Colour.Purple},
-        {name: "General", value:5, desc: "", colour: Colour.Red},
-        {name: "Scholar", value:3, desc: "", colour: Colour.Blue},
-        {name: "Scholar", value:3, desc: "", colour: Colour.Blue},
-        {name: "Scholar", value:3, desc: "", colour: Colour.Blue},
-        {name: "Scholar", value:3, desc: "", colour: Colour.Blue},
-        {name: "Scholar", value:3, desc: "", colour: Colour.Blue}, 
-    ];
+    const nickname = location.state?.nickname || localStorage.getItem("nickname");
 
-    const Players = [
-        { id: "1", nickname: "Finley", points: 20 }, 
-        { id: "2", nickname: "Oliver", points: 2 },
-        { id: "3", nickname: "Reuben", points: 5 },
-        { id: "4", nickname: "Caite", points: 15 },
-        { id: "5", nickname: "Dad", points: 15,  heads: [
-            {name: "Archbishop", value:4, desc: "", colour: Colour.Blue}, 
-            {name: "Baron", value:3, desc: "", colour: Colour.Purple},
-            {name: "Captain of the Guard", value:3, desc: "Add another noble to the end of the line after you collect this noble.", colour: Colour.Red},
-            {name: "Archbishop", value:4, desc: "", colour: Colour.Blue},
-            {name: "Archbishop", value:4, desc: "", colour: Colour.Blue},
-        ] }
-    ];
+
     
-    const currentPlayerId = "1";
+
+    useEffect(() => {
+        if (!roomCode || !nickname) return;
+
+        const handleUpdate = (data: any) => {
+            console.log("Received state:", data);
+            setGameState(data);
+        };
+
+        socket.on("game-state-update", handleUpdate);
+
+        // Send the actual values, not undefined!
+        console.log(`Requesting state for ${roomCode} as ${nickname}`);
+        socket.emit("request-game-state", { 
+            roomCode: roomCode.toUpperCase(), 
+            nickname 
+        });
+
+        return () => {
+            socket.off("game-state-update", handleUpdate);
+        };
+    }, [roomCode, nickname]);
+
+    if (!gameState) {
+        return (
+            <div className="text-white text-center mt-20">
+                <p className="animate-pulse">Waiting for executioner...</p>
+                <p className="text-xs text-gray-500 mt-2">Room: {roomCode} | User: {nickname}</p>
+            </div>
+        );
+    }
+
+    const me = gameState.players.find((p: any) => p.nickname === nickname);
+    const isMyTurn = gameState.players[gameState.turnIndex]?.id === socket.id;
+
+
+    const groupedCollection = me?.collection?.reduce((acc: any, head: any) => {
+        const color = head.color || 'gray';
+        if (!acc[color]) acc[color] = [];
+        acc[color].push(head);
+        return acc;
+    }, {});
+
+    const handleExecute = () => {
+        if (!isMyTurn) return;
+        socket.emit("execute-noble", { roomCode });
+    };
 
     return (
-        <div className="pt-6 flex flex-col overflow-hidden w-screen h-screen items-center">
-            {/* Card Focus */}  
-            {focus && (
-                <>
-                <div className="absolute inset-0 bg-black/70 flex items-center justify-center z-50"
-                 onClick={() => {
-                    setFocus(false);
-                }}
-                ></div>
-                <div className="absolute z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                    <button
-                        className="absolute z-10 text-black right-2 top-2 text-9xl font-bold"
-                        onClick={() => setFocus(false)}
-                    >
-                        <img src="/assets/icons/close.png" width="40px" className="hover:invert-50" />
-                    </button>
-                    <img
-                        src={focusCardUrl}
-                        className="brightness-125"
-                        style={{
-                            maskImage: "url('/assets/images/card_mask.png')",
-                            WebkitMaskImage: "url('/assets/images/card_mask.png')",
-                            maskSize: "cover",
-                            maskComposite: "exclude"
-                        }}
-                    />
+        <div className="min-h-screen bg-[#1a1a1a] text-white font-mono p-4 md:p-8 overflow-hidden">
+            
+            {/* Top Bar: Opponents Scoreboard */}
+            <div className="flex justify-between items-start mb-8">
+                <div className="bg-black border-2 border-red-500 p-4 rounded-lg shadow-[0_0_15px_rgba(239,68,68,0.4)]">
+                    <p className="text-xs uppercase text-gray-400">Your Score</p>
+                    <p className="text-4xl font-bold text-red-500 italic">{me?.score || 0}</p>
                 </div>
-                </>
-            )}
-            {/* Player Map */}  
-            {playerMap && (
-                <>
-                <div className="absolute z-50 top-1/2 left-1/2 backdrop-blur-md bg-gray-800/10 border min-h-36 min-w-sm border-gray-700 rounded-2xl -translate-x-1/2 -translate-y-3/4 b">
-                    <p className="text-lg text-white">{Players[playerMapID].nickname}</p>
-                    <div className="flex">
-                        {Players[playerMapID].heads?.map((_head, index) => (
-                            <div
-                                key={index}
-                                className="p-2 hover:scale-110 hover:z-30 transition-all duration-300 ease-in-out w-28 2xl:w-40"
-                                onClick={() => {
-                                    setFocusCardUrl(`/assets/cards/images/v${index + 1}.jpeg`);
-                                    setFocus(true);
-                                }}
-                            >
-                                <img
-                                    src={`/assets/cards/images/v${index + 1}.jpeg`}
-                                    className="brightness-135 object-cover"
-                                    style={{
-                                        maskImage: "url('/assets/images/card_mask.png')",
-                                        WebkitMaskImage: "url('/assets/images/card_mask.png')",
-                                        maskSize: "cover",
-                                        maskPosition: "center",
-                                        maskComposite: "exclude"
-                                    }}
-                                />
+                
+                <div className="flex flex-col gap-2">
+                    {gameState.players.map((p: any) => (
+                        p.id !== socket.id && (
+                            <div key={p.id} className="bg-gray-800 p-2 rounded border border-gray-600 flex justify-between w-48">
+                                <span>{p.nickname}</span>
+                                <span className="font-bold text-red-400">{p.score}</span>
                             </div>
-                        ))}
+                        )
+                    ))}
+                    <div className="mt-2 text-center bg-yellow-400 text-black font-black text-xs py-1 rounded animate-bounce">
+                        DAY {gameState.day} / 3
                     </div>
                 </div>
-                </>
-            )}
+            </div>
 
-            {/* Players Display */}
-            <ul className="max-w-7xl pl-8 pr-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 w-full text-center">
-                {Players.map((player, loc) =>
-                    player.id !== currentPlayerId ? (
-                        <li
-                            key={player.id}
-                            className="p-3 rounded-xl shadow-md bg-gray-300 hover:bg-gray-200 hover:cursor-pointer"
-                            onClick={() => {
-                                setplayerMapID(loc);
-                                setplayerMap(true);
-                            }}
-                        >
-                            <p className="font-semibold text-black text-md xl:text-xl">
-                                {player.nickname} ({player.points})
-                            </p>
-                        </li>
-                    ) : null
-                )}
-            </ul>
-
-            <div className="h-1/8 w-full"></div>
-
-            <div className="flex">
-                <div className="w-1/10 h-full ml-5 mr-5">
-                    <div className="blade bg-gray-600">
-                        <div className="hightlight bg-gray-400"></div>
-                    </div>
+            {/* Main Game Area */}
+            <div className="relative flex flex-col items-center">
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 -rotate-90 origin-left hidden md:block">
+                    <div className="text-6xl font-black text-gray-700 tracking-tighter opacity-10 uppercase">Guillotine</div>
                 </div>
-                {/* Main Line-Up*/}
-                <div className="flex-col grid grid-cols-4 md:grid-cols-6 xl:grid-cols-13 gap-2 w-9/10">
-                    {Heads.map((_, index) => (
+
+                {/* The Line-Up */}
+                <div className="flex gap-2 items-center justify-start w-full overflow-x-auto pb-12 pt-10 px-10 no-scrollbar">
+                    {gameState.lineUp.map((head: any, i: number) => (
                         <div
-                            key={index}
-                            className="p-2 hover:scale-110 hover:z-30 transition-all duration-300 ease-in-out w-28 2xl:w-40"
-                            onClick={() => {
-                                setFocusCardUrl(`/assets/cards/images/v${index + 1}.jpeg`);
-                                setFocus(true);
-                            }}
+                            key={head.instanceId}
+                            onClick={() => i === 0 && isMyTurn ? handleExecute() : setFocusCard(head)}
+                            className={`
+                                relative flex-shrink-0 w-32 h-48 rounded-xl cursor-pointer transition-all duration-300
+                                ${i === 0 && isMyTurn ? 'scale-110 border-4 border-yellow-400 z-20 shadow-[0_0_40px_rgba(250,204,21,0.6)]' : 'hover:-translate-y-4 z-10'}
+                            `}
                         >
-                            <img
-                                src={`/assets/cards/images/v${index + 1}.jpeg`}
-                                className="brightness-135 object-cover"
-                                style={{
-                                    maskImage: "url('/assets/images/card_mask.png')",
-                                    WebkitMaskImage: "url('/assets/images/card_mask.png')",
-                                    maskSize: "cover",
-                                    maskPosition: "center",
-                                    maskComposite: "exclude"
+                            {/* Card Image */}
+                            <img 
+                                src={`/assets/cards/images/${head.key}.jpeg`} 
+                                alt={head.name}
+                                className="w-full h-full object-cover rounded-xl shadow-lg"
+                                onError={(e) => {
+                                    e.currentTarget.src = "/assets/cards/card-back.png";
                                 }}
                             />
+                            
+                            {/* Overlay Value (Optional - if the value is already on your card art) */}
+                            {/* <div className="absolute top-2 left-2 bg-black/50 px-2 rounded font-black text-xl">
+                                {head.value}
+                            </div> */}
                         </div>
                     ))}
                 </div>
             </div>
 
-            <div className="h-1/13 w-full"></div>
+            {/* Bottom Section: Hand & Status */}
+            <div className="fixed bottom-0 left-0 w-full p-6 flex justify-between items-end bg-gradient-to-t from-black/80 to-transparent">
+                {/* Your Collection (Score Pile) grouped by Color */}
+                <div className="flex flex-col gap-2">
+                    <p className="text-[10px] uppercase font-bold text-gray-500">Collection</p>
+                    <div className="flex gap-6 items-end">
+                        {groupedCollection && Object.entries(groupedCollection).map(([color, heads]: [string, any]) => (
+                            <div key={color} className="relative group flex flex-col items-center">
+                                {/* Stack Container */}
+                                <div className="flex -space-x-16 group-hover:-space-x-4 transition-all duration-500 ease-out">
+                                    {heads.map((head: any, i: number) => (
+                                        <img 
+                                            key={head.instanceId}
+                                            src={`/assets/cards/images/${head.key}.jpeg`} 
+                                            onClick={() => setFocusCard(head)}
+                                            className={`
+                                                w-20 h-28 rounded-lg border border-white/20 shadow-2xl 
+                                                transform transition-all duration-300
+                                                hover:-translate-y-8 hover:z-50
+                                                ${BALATRO_PALETTE[color]}
+                                            `}
+                                            style={{
+                                                // Slight rotation for a "messy stack" look
+                                                transform: `rotate(${(i % 2 === 0 ? 1 : -1) * (i * 2)}deg)`,
+                                                zIndex: i
+                                            }}
+                                        />
+                                    ))}
+                                </div>
+                                {/* Color Label */}
+                                <span className="mt-2 text-[8px] uppercase font-black opacity-0 group-hover:opacity-100 transition-opacity text-gray-400">
+                                    {color} ({heads.length})
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
 
-            {/* Decks Section */}
-            <div className="flex h-auto w-full justify-end gap-4">
-                <div className="p-0.5 z-10 shadow-2xl shadow-black hover:scale-105 hover:z-30 transition-all duration-300 ease-in-out w-28 2xl:w-40"
-                    onClick={() => {
-                        setFocusCardUrl(`/assets/cards/images/actions.jpeg`);
-                        setFocus(true);
-                    }}
-                >
-                    <img
-                        src="/assets/cards/images/actions.jpeg"
-                        className="brightness-125 object-cover w-full h-full"
-                        style={{
-                            maskImage: "url('/assets/images/card_mask.png')",
-                            WebkitMaskImage: "url('/assets/images/card_mask.png')",
-                            maskSize: "cover",
-                            maskPosition: "center",
-                            maskComposite: "exclude",
-                        }}
-                    />
+                {/* Game Information & Action Card Draw Pile */}
+                <div className="flex flex-col items-end gap-4">
+                    {isMyTurn && <div className="bg-red-600 px-4 py-2 text-xl font-black italic skew-x-[-12deg] shadow-lg animate-pulse">YOUR TURN</div>}
+                    <div className="flex gap-4">
+                        <div className="w-24 h-36 bg-blue-900 rounded-xl border-2 border-blue-400 flex flex-col items-center justify-center shadow-[6px_6px_0px_#1e3a8a] relative overflow-hidden group">
+                            <div className="absolute inset-0 bg-white/5 group-hover:bg-white/10 transition-colors"></div>
+                            <span className="rotate-90 font-black text-blue-400 text-xs tracking-widest">ACTIONS</span>
+                            <span className="mt-2 text-[10px] text-blue-300">{gameState.actionDeckCount || '??'}</span>
+                        </div>
+                    </div>
                 </div>
-                <div className="p-0.5 z-10 shadow-2xl shadow-black hover:scale-105 hover:z-30 transition-all duration-300 ease-in-out w-28 2xl:w-40"
-                    onClick={() => {
-                        setFocusCardUrl(`/assets/cards/images/nobles.jpeg`);
-                        setFocus(true);
-                    }}
-                >
-                    <img
-                        src="/assets/cards/images/nobles.jpeg"
-                        className="brightness-125 object-cover w-full h-full"
-                        style={{
-                            maskImage: "url('/assets/images/card_mask.png')",
-                            WebkitMaskImage: "url('/assets/images/card_mask.png')",
-                            maskSize: "cover",
-                            maskPosition: "center",
-                            maskComposite: "exclude",
-                        }}
-                    />
-                </div>
-                <div className="w-1/10 h-full mr-5"></div>
             </div>
 
-            <div className="h-1/5"></div>
+            {/* Detailed View Modal */}
+            {focusCard && (
+                <div 
+                    className="fixed inset-0 bg-black/90 backdrop-blur-md z-[100] flex items-center justify-center p-6"
+                    onClick={() => setFocusCard(null)}
+                >
+                    <img 
+                        src={`/assets/cards/images/${focusCard.key}.jpeg`} 
+                        alt={focusCard.name}
+                        className="asspect-[4/5] object-cover rounded-xl shadow-lg"
+                        onError={(e) => {
+                            e.currentTarget.src = "/assets/cards/card-back.png";
+                        }}
+                    />
+                </div>
+            )}
         </div>
     );
 };

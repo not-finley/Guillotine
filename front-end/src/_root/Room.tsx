@@ -30,15 +30,17 @@ const Room = () => {
   }, [roomCode]);
 
   useEffect(() => {
-    socket.on("start-game", () => {
-      console.log("Game is starting!");
-      navigate(`/game/${roomCode}`); // Redirect all players
+  // Listen for the state update instead of just 'start-game'
+    socket.on("game-state-update", (initialState) => {
+      console.log("Game state received, transitioning...");
+      // We pass the nickname in state as a backup to localStorage
+      navigate(`/game/${roomCode}`, { state: { nickname } });
     });
 
     return () => {
-      socket.off("start-game");
+      socket.off("game-state-update");
     };
-  }, [navigate, roomCode]);
+  }, [navigate, roomCode, nickname]);
 
   useEffect(() => {
     const savedRoomCode = localStorage.getItem("roomCode");
@@ -52,12 +54,13 @@ const Room = () => {
   }, [roomCode]);
 
   const handleJoin = () => {
-    if (!nickname.trim()) return; // Prevent empty nickname
-    localStorage.setItem("nickname", nickname);
-    localStorage.setItem("roomCode", roomCode? roomCode:"");
-    setShowModal(false);
-    socket.emit("join-room", { inputCode: roomCode, nickname });
-  }
+  if (!nickname.trim()) return;
+  const upperCode = roomCode ? roomCode.toUpperCase() : ""; 
+  localStorage.setItem("nickname", nickname);
+  localStorage.setItem("roomCode", upperCode);
+  setShowModal(false);
+  socket.emit("join-room", { inputCode: upperCode, nickname });
+};
 
   const copyToClipboard = (event: MouseEvent<HTMLButtonElement>) => {
     if (roomCode) {
