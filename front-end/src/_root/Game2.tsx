@@ -11,11 +11,26 @@ const BALATRO_PALETTE: Record<string, string> = {
     gray: "bg-[#95a5a6] border-[#7f8c8d]",   
 };
 
+const actionCardConfig: Record<string, { requiresTarget?: boolean | "player" | "index" }> = {
+  a1: { requiresTarget: "player" },
+  a13: { requiresTarget: "index" },
+  a39: { requiresTarget: "index" },
+  a44: { requiresTarget: "index" },
+  // Add other cards here as needed
+};
+
+function isNumberArray(arr: number[] | string[] | undefined): arr is number[] {
+    return Array.isArray(arr) && arr.every(item => typeof item === "number");
+}
+
 const Game2 = () => {
     const [gameState, setGameState] = useState<any>(null);
     const location = useLocation();
     const { roomCode } = useParams<{ roomCode: string }>();
     const [focusCard, setFocusCard] = useState<any>(null);
+    const [viewPlayer, setViewPlayer] = useState<any>(null);
+    const [selectedAction, setSelectedAction] = useState<null | { card: any, validTargets: number[] | string[] }>(null);
+
 
     const nickname = location.state?.nickname || localStorage.getItem("nickname");
 
@@ -32,15 +47,24 @@ const Game2 = () => {
 
         socket.on("game-state-update", handleUpdate);
 
-        // Send the actual values, not undefined!
-        console.log(`Requesting state for ${roomCode} as ${nickname}`);
-        socket.emit("request-game-state", { 
-            roomCode: roomCode.toUpperCase(), 
-            nickname 
-        });
+        const handleConnect = () => {
+            console.log(`Requesting state for ${roomCode} as ${nickname}`);
+            socket.emit("request-game-state", {
+            roomCode: roomCode.toUpperCase(),
+            nickname
+            });
+        };
+
+        socket.on("connect", handleConnect);
+
+        // in case we are already connected
+        if (socket.connected) {
+            handleConnect();
+        }
 
         return () => {
             socket.off("game-state-update", handleUpdate);
+            socket.off("connect", handleConnect);
         };
     }, [roomCode, nickname]);
 
@@ -54,11 +78,19 @@ const Game2 = () => {
     }
 
     const me = gameState.players.find((p: any) => p.nickname === nickname);
-    const isMyTurn = gameState.players[gameState.turnIndex]?.id === socket.id;
+    const isMyTurn =
+        gameState.players[gameState.turnIndex]?.nickname === nickname;
 
 
     const groupedCollection = me?.collection?.reduce((acc: any, head: any) => {
         const color = head.color || 'gray';
+        if (!acc[color]) acc[color] = [];
+        acc[color].push(head);
+        return acc;
+    }, {});
+
+    const viewedCollection = viewPlayer?.collection?.reduce((acc: any, head: any) => {
+        const color = head.color || "gray";
         if (!acc[color]) acc[color] = [];
         acc[color].push(head);
         return acc;
@@ -69,25 +101,70 @@ const Game2 = () => {
         socket.emit("execute-noble", { roomCode });
     };
 
+    const handleSelectActionCard = (card: any) => {
+        const config = actionCardConfig[card.key];
+        if (!config?.requiresTarget) {
+            // no target needed, just play
+            socket.emit("play-action-card", {
+            roomCode,
+            instanceId: card.instanceId
+            });
+            return;
+        }
+
+        let validTargets: number[] | string[] = [];
+
+        if (config.requiresTarget === "index") {
+            // highlight all nobles in the line as targets
+            validTargets = gameState.lineUp.map((_:any, i:any) => i);
+        } else if (config.requiresTarget === "player") {
+            validTargets = gameState.players
+                .filter((p: any) => p.nickname !== me.nickname)
+                .map((p: any) => p.nickname);
+        }
+
+        setSelectedAction({ card, validTargets });
+    };
+
     return (
         <div className="h-screen w-screen bg-[#1f1f1f] text-white font-mono flex flex-col overflow-hidden">
             
             {/* Top Bar: Opponents Scoreboard */}
-            <div className="flex justify-between items-start mb-8">
+            <div className="flex justify-between items-start mb-8 mt-5 ml-5 mr-5">
                 <div className="bg-black border-2 border-red-500 p-4 rounded-lg shadow-[0_0_15px_rgba(239,68,68,0.4)]">
                     <p className="text-xs uppercase text-gray-400">Your Score</p>
                     <p className="text-4xl font-bold text-red-500 italic">{me?.score || 0}</p>
                 </div>
                 
                 <div className="flex flex-col gap-2">
-                    {gameState.players.map((p: any) => (
+                   {gameState.players.map((p: any) => (
                         p.id !== socket.id && (
-                            <div key={p.id} className="bg-gray-800 p-2 rounded border border-gray-600 flex justify-between w-48">
-                                <span>{p.nickname}</span>
-                                <span className="font-bold text-red-400">{p.score}</span>
+                            <div
+                            key={p.nickname}
+                            className={`
+                                cursor-pointer relative p-2 rounded border flex justify-between w-48 transition-all hover:scale-105
+                                ${p.connected 
+                                ? "bg-gray-800 border-gray-600" 
+                                : "bg-gray-700 border-red-500 opacity-60 animate-pulse"}
+                            `}
+                            onClick={() => setViewPlayer(p)}
+                            >
+                            <span className={!p.connected ? "line-through" : ""}>
+                                {p.nickname}
+                            </span>
+
+                            <span className="font-bold text-red-400">
+                                {p.score}
+                            </span>
+
+                            {!p.connected && (
+                                <div className="absolute -top-2 -right-2 text-[10px] bg-red-600 px-1 py-[2px] rounded">
+                                DC
+                                </div>
+                            )}
                             </div>
                         )
-                    ))}
+                        ))}
                     <div className="mt-2 text-center bg-yellow-400 text-black font-black text-xs py-1 rounded animate-bounce">
                         DAY {gameState.day} / 3
                     </div>
@@ -97,8 +174,8 @@ const Game2 = () => {
             {/* Main Game Area */}
             <div className="relative flex flex-col items-center w-full">
                 {/* Background Title */}
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 -rotate-90 origin-left hidden lg:block">
-                    <div className="text-6xl font-black text-gray-400 tracking-tighter opacity-10 uppercase select-none">
+                <div className="absolute left-10 top-96 -translate-y-1/2 -rotate-90 origin-left hidden lg:block">
+                    <div className="text-8xl font-black text-gray-400 tracking-tighter opacity-10 uppercase select-none">
                         Guillotine
                     </div>
                 </div>
@@ -108,12 +185,36 @@ const Game2 = () => {
                     
                     {/* The Card Wrapper: This uses negative spacing to bunch cards up */}
                     <div className="flex items-center justify-center -space-x-16 sm:-space-x-12 md:space-x-2 lg:space-x-4 transition-all duration-500">
-                        {gameState.lineUp.map((head: any, i: number) => (
+                        {gameState.lineUp.map((head: any, i: number) => {
+                             const isTargetable = isNumberArray(selectedAction?.validTargets) 
+                                     && selectedAction.validTargets.includes(i);
+                            return(
                             <div
                                 key={head.instanceId}
-                                onClick={() => i === 0 && isMyTurn ? handleExecute() : setFocusCard(head)}
+                                onClick={() => {
+                                    if (!isMyTurn) {
+                                        setFocusCard(head);
+                                        return;
+                                    }
+
+                                    if (selectedAction && selectedAction.card) {
+                                        if (isTargetable) {
+                                            // play action card with index target
+                                            socket.emit("play-action-card", {
+                                                roomCode,
+                                                instanceId: selectedAction.card.instanceId,
+                                                target: i
+                                            });
+                                            setSelectedAction(null); // reset selection
+                                        }
+                                    } else if (i === 0) {
+                                        handleExecute();
+                                    } else {
+                                        setFocusCard(head);
+                                    }
+                                }}
                                 className={`
-                                     relative flex-shrink-0 w-28 h-40 sm:w-32 sm:h-48 rounded-xl cursor-pointer transition-all duration-300 ease-out
+                                     relative flex-shrink-0 w-24 h-34 sm:w-34 sm:h-48 rounded-xl cursor-pointer transition-all duration-300 ease-out
                                     
                                     /* Expansion Logic: When hovering a bunched card, push neighbors aside and pop up */
                                     hover:mx-10 sm:hover:mx-12 md:hover:mx-2 
@@ -144,8 +245,8 @@ const Game2 = () => {
                                         e.currentTarget.src = "/assets/cards/card-back.png";
                                     }}
                                 />
-                            </div>
-                        ))}
+                            </div>)
+                        })}
                     </div>
                 </div>
             </div>
@@ -205,15 +306,8 @@ const Game2 = () => {
                 
                 {/* Play Button Overlay */}
                 {isMyTurn && (
-                    <button 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            // Example: Send roomCode and the specific card
-                            socket.emit("play-action-card", { 
-                                roomCode, 
-                                cardInstanceId: card.instanceId 
-                            });
-                        }}
+                    <button
+                        onClick={() => handleSelectActionCard(card)}
                         className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity font-bold"
                     >
                         PLAY
@@ -235,12 +329,53 @@ const Game2 = () => {
                         src={`/assets/cards/images/${focusCard.key}.jpeg`} 
                         alt={focusCard.name}
                         className="aspect-[5/7] object-cover rounded-xl shadow-lg brightness-110"
+                         onClick={(e) => e.stopPropagation()}
                         onError={(e) => {
                             e.currentTarget.src = "/assets/cards/card-back.png";
                         }}
                     />
                 </div>
             )}
+            {viewPlayer && (
+                <div
+                    className="fixed inset-0 bg-black/90 backdrop-blur-md z-[120] flex flex-col items-center justify-center p-6"
+                    onClick={() => setViewPlayer(null)}
+                >
+                    <div className="text-2xl font-black mb-6">
+                    {viewPlayer.nickname}'s Collection
+                    </div>
+
+                    <div className="flex gap-8 flex-wrap justify-center">
+                    {viewedCollection &&
+                        Object.entries(viewedCollection).map(([color, heads]: [string, any]) => (
+                        <div className="flex -space-x-16 group-hover:-space-x-4 transition-all duration-500 ease-out">
+                            {heads.map((head: any, i: number) => (
+                                <img 
+                                    key={head.instanceId}
+                                    src={`/assets/cards/images/${head.key}.jpeg`} 
+                                    onClick={() => setFocusCard(head)}
+                                    className={`
+                                        w-24 h-34 rounded-lg border border-white/20 shadow-2xl brightness-110
+                                        transform transition-all duration-300
+                                        hover:-translate-y-8 hover:z-50
+                                        ${BALATRO_PALETTE[color]}
+                                    `}
+                                    style={{
+                                        // Slight rotation for a "messy stack" look
+                                        transform: `rotate(${(i % 2 === 0 ? 1 : -1) * (i * 2)}deg)`,
+                                        zIndex: i
+                                    }}
+                                />
+                            ))}
+                                </div>
+                        ))}
+                    </div>
+
+                    <div className="mt-8 text-gray-500 text-xs">
+                    click anywhere to close
+                    </div>
+                </div>
+                )}
         </div>
     );
 };
