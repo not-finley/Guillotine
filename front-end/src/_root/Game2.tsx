@@ -168,19 +168,21 @@ const Game2 = () => {
         );
     }
 
-    const groupedCollection = me?.collection?.reduce((acc: any, head: any) => {
+    const initialCollection: Record<string, any[]> = {};
+
+    const groupedCollection = (me?.collection || []).reduce((acc: Record<string, any[]>, head: any) => {
         const color = head.color || 'gray';
         if (!acc[color]) acc[color] = [];
         acc[color].push(head);
         return acc;
-    }, {});
+    }, { ...initialCollection });
 
-    const viewedCollection = viewPlayer?.collection?.reduce((acc: any, head: any) => {
+    const viewedCollection = (viewPlayer?.collection || []).reduce((acc: Record<string, any[]>, head: any) => {
         const color = head.color || "gray";
         if (!acc[color]) acc[color] = [];
         acc[color].push(head);
         return acc;
-    }, {});
+    }, { ...initialCollection });
 
     const handleExecute = () => {
         if (!isMyTurn) return;
@@ -225,33 +227,39 @@ const Game2 = () => {
                 
                 <div className="flex flex-col gap-2">
                     {gameState.players.map((p: any) => (
-                        p.nickname !== nickname && (
-                            <div
-                                key={p.nickname}
-                                className={`cursor-pointer relative p-3 rounded-xl border flex flex-col w-52 transition-all hover:scale-[1.03] ${p.connected ? "bg-zinc-900 border-zinc-700 hover:border-zinc-500" : "bg-zinc-800 border-red-500 opacity-60 animate-pulse"} ${selectedAction && selectedAction.validTargets.includes(p.nickname) ? "border-blue-500 bg-blue-950/40 shadow-[0_0_15px_rgba(59,130,246,0.3)] animate-pulse" : ""}`}
-                                onClick={() => {
-                                    if (selectedAction && selectedAction.validTargets.includes(p.nickname)) {
-                                        socket.emit("play-action-card", { roomCode, instanceId: selectedAction.card.instanceId, target: p.nickname });
-                                        setSelectedAction(null);
-                                    } else {
-                                        setViewPlayer(p);
-                                    }
-                                }}
-                            >
-                                <div className="flex justify-between items-center w-full">
-                                    <span className={`font-bold ${!p.connected ? "line-through text-gray-500" : ""}`}>{p.nickname}</span>
-                                    <span className="font-black text-red-400">{p.score} pts</span>
-                                </div>
-                                {p.tableau && p.tableau.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-2">
-                                        {p.tableau.map((t: any) => (
-                                            <span key={t.instanceId} className="text-[9px] bg-amber-950 text-amber-400 px-1 py-0.5 rounded border border-amber-800 font-bold uppercase truncate max-w-full">📜 {t.name}</span>
-                                        ))}
-                                    </div>
-                                )}
+                    p.nickname !== nickname && (
+                        <div
+                            key={p.nickname}
+                            className={`cursor-pointer relative p-3 rounded-xl border flex flex-col w-52 transition-all hover:scale-[1.03] ${
+                                p.connected ? "bg-zinc-900 border-zinc-700 hover:border-zinc-500" : "bg-zinc-800 border-red-500 opacity-60 animate-pulse"
+                            } ${
+                                selectedAction && (selectedAction.validTargets as any[]).includes(p.nickname) 
+                                    ? "border-blue-500 bg-blue-950/40 shadow-[0_0_15px_rgba(59,130,246,0.3)] animate-pulse" 
+                                    : ""
+                            }`}
+                            onClick={() => {
+                                if (selectedAction && (selectedAction.validTargets as any[]).includes(p.nickname)) {
+                                    socket.emit("play-action-card", { roomCode, instanceId: selectedAction.card.instanceId, target: p.nickname });
+                                    setSelectedAction(null);
+                                } else {
+                                    setViewPlayer(p);
+                                }
+                            }}
+                        >
+                            <div className="flex justify-between items-center w-full">
+                                <span className={`font-bold ${!p.connected ? "line-through text-gray-500" : ""}`}>{p.nickname}</span>
+                                <span className="font-black text-red-400">{p.score} pts</span>
                             </div>
-                        )
-                    ))}
+                            {p.tableau && p.tableau.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                    {p.tableau.map((t: any) => (
+                                        <span key={t.instanceId} className="text-[9px] bg-amber-950 text-amber-400 px-1 py-0.5 rounded border border-amber-800 font-bold uppercase truncate max-w-full">📜 {t.name}</span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )
+                ))}
                     <div className="mt-1 text-center bg-yellow-400 text-black font-black text-xs py-1 rounded shadow-md">DAY {gameState.day} / 3</div>
                 </div>
             </div>
