@@ -4,6 +4,7 @@ const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
 const allCards = require("./assets/cards/cards.json");
+const { resolveActionCard } = require("./actions.js");
 
 const app = express();
 const server = http.createServer(app);
@@ -151,13 +152,11 @@ const actionCardEffects = {
     const noble = gs.lineUp.shift();
     victim.collection.push(noble);
     victim.score += noble.value;
-    discardEffect(gs, card);
   },
 
   // Rotate lineup
   a2: ({ gs, card }) => {
     if (gs.lineUp.length) gs.lineUp.push(gs.lineUp.shift());
-    discardEffect(gs, card);
   },
 
   // Move a green card
@@ -168,7 +167,6 @@ const actionCardEffects = {
     const removed = discardFromLine(gs, target);
     if (!removed || !gs.nobleDeck.length) return;
     gs.lineUp.splice(target, 0, gs.nobleDeck.shift());
-    discardEffect(gs, card);
   },
 
   // Extra noble for player
@@ -276,7 +274,6 @@ const actionCardEffects = {
     const victim = room.players.find(p => p.nickname === target.player);
     if (!victim) return;
     discardFromTableau(gs, victim, target.instanceId);
-    discardEffect(gs, card);
   },
 
   // Place support cards in tableau
@@ -289,46 +286,55 @@ const actionCardEffects = {
 };
 
 
-
-function resolveActionCard({ room, player, card, target }) {
-  const gs = room.gameState;
-  const effectFn = actionCardEffects[card.key];
-
-  if (!effectFn) return;
-  effectFn({ gs, room, player, card, target });
-
-  if (!gs.discard.includes(card) && !["a4","a6","a16","a18","a21","a32"].includes(card.key)) {
-    gs.discard.push(card);
-  }
-}
-
 function updateScoreForNoble(player, noble, gameState) {
+  // 1. Reset base score calculations to zero to run a clean, full-collection tally
+  player.score = 0;
 
-    if (typeof noble.value === 'number') {
-      player.score += noble.value;
-      return;
-    }
+  // 2. Count types across your collected pile
+  const palaceGuards = player.collection.filter(c => c.key === 'r1').length;
+  const totalGray = player.collection.filter(c => c.color === 'gray').length;
+  
+  const hasCount = player.collection.some(c => c.key === 'v5');
+  const hasCountess = player.collection.some(c => c.key === 'v6');
 
-    switch (noble.key) {
-        case 'r1':
-            const palaceGuardCount = player.collection.filter(c => c.key === 'r1').length;
-            const previousR1Points = ((palaceGuardCount - 1) ** 2);
-            player.score -= previousR1Points;
-            const newR1Points = palaceGuardCount * palaceGuardCount;
-            player.score += newR1Points;
-            break;
-        case 'extra-card':
-            // Draw an extra card from action deck if available
-            if (gameState.actionDeck.length > 0) {
-                player.hand.push(gameState.actionDeck.shift());
-            }
-            break;
-        case '*':
-            // '*' means some custom scoring logic
-            // e.g., 1 point per 3 nobles collected
-            player.score += Math.floor(player.collection.length / 3);
-            break;
+  // 3. Scan all tableau support cards affecting values
+  const hasIndifferentPublic = player.tableau.some(c => c.key === 'a21');
+  const churchSupportCount = player.tableau.filter(c => c.key === 'a4').length;
+  const civicSupportCount = player.tableau.filter(c => c.key === 'a6').length;
+  const militarySupportCount = player.tableau.filter(c => c.key === 'a32').length;
+
+  // 4. Score each individual head card
+  player.collection.forEach(n => {
+    if (typeof n.value === 'number') {
+      if (n.color === 'gray' && hasIndifferentPublic) {
+        player.score += 1; // a21 overrides negative gray cards to +1 point
+      } else {
+        player.score += n.value;
+      }
+    } else if (n.key === 'r1') {
+      // Palace guards score dynamically based on total quantity collected
+      player.score += palaceGuards;
+    } else if (n.key === 'g1') {
+      // Tragic figure: -1 point per gray noble in score pile
+      player.score -= totalGray;
     }
+  });
+
+  // 5. Apply set bonuses (Count + Countess pairs)
+  if (hasCount && hasCountess) {
+    player.score += 4; // Both receive +2 extra bonus points
+  }
+
+  // 6. Apply permanent support multipliers from the player's tableau field
+  player.collection.forEach(n => {
+    if (n.color === 'blue') player.score += (churchSupportCount * 1);
+    if (n.color === 'green') player.score += (civicSupportCount * 1);
+    if (n.color === 'red') player.score += (militarySupportCount * 1);
+  });
+
+  // 7. Deduct negative points from attachment cards (e.g., Tough Crowd)
+  const toughCrowdCount = player.tableau.filter(c => c.key === 'a47').length;
+  player.score -= (toughCrowdCount * 2);
 }
 
 io.on("connection", (socket) => {
@@ -466,38 +472,127 @@ io.on("connection", (socket) => {
     room.lastActivity = Date.now();
 
     const gs = room.gameState;
-    const currentPlayer = room.players[gs.turnIndex];
+    let currentPlayer = room.players[gs.turnIndex];
     if (socket.id !== currentPlayer.id) return;
 
-    // 1. Collect
-    const noble = gs.lineUp.shift();
-    currentPlayer.collection.push(noble);
+    // --- 0. CONFUSION IN LINE (a9) ---
+    if (currentPlayer.triggerLineShuffleNextTurn) {
+        gs.lineUp.sort(() => Math.random() - 0.5);
+        currentPlayer.triggerLineShuffleNextTurn = false;
+        console.log(`Line randomized by Confusion in Line for ${currentPlayer.nickname}!`);
+    }
 
-    updateScoreForNoble(currentPlayer, noble, gs);
+    // Guard: Check if a card effect forces the player to skip collecting a noble (e.g., a37)
+    if (currentPlayer.skipNobleThisTurn) {
+        currentPlayer.skipNobleThisTurn = false; // Reset modifier
+        console.log(`${currentPlayer.nickname} skipped noble collection due to card effect.`);
+    } else if (gs.lineUp.length > 0) {
+        // 1. Collect the noble at the front of the line
+        const noble = gs.lineUp.shift();
 
-    // 2. Draw an Action Card
+        // Handle "The Clown" (g4): passes to NEXT player in rotation sequence
+        if (noble.key === 'g4') {
+            const nextIndex = (gs.turnIndex + 1) % room.players.length;
+            const victim = room.players[nextIndex];
+            victim.collection.push(noble);
+            updateScoreForNoble(victim, noble, gs);
+            console.log(`Clown collected! Passed to ${victim.nickname}'s score pile.`);
+        } else {
+            currentPlayer.collection.push(noble);
+            updateScoreForNoble(currentPlayer, noble, gs);
+            
+            // Handle Innocent Victim (g2): must discard an action card from hand
+            if (noble.key === 'g2') {
+                currentPlayer.mustDiscardActionCount = (currentPlayer.mustDiscardActionCount || 0) + 1;
+            }
+        }
+
+        // --- TRIGGER IMMEDIATE HEAD EFFECTS UPON COLLECTION ---
+        
+        // Lady in Waiting (v2), Lady (v8), Lord (v9): Draw an extra action card
+        if (['v2', 'v8', 'v9'].includes(noble.key)) {
+            if (gs.actionDeck.length > 0) {
+                currentPlayer.hand.push(gs.actionDeck.shift());
+            }
+        }
+        
+        // Rival Executioner (e1): Collect top noble of the noble deck directly
+        if (noble.key === 'e1' && gs.nobleDeck.length > 0) {
+            const bonusNoble = gs.nobleDeck.shift();
+            currentPlayer.collection.push(bonusNoble);
+            updateScoreForNoble(currentPlayer, bonusNoble, gs);
+        }
+
+        // Captain of the Guard (r3), General (r5): Add a noble from deck to the end of the line
+        if (['r3', 'r5'].includes(noble.key) && gs.nobleDeck.length > 0) {
+            gs.lineUp.push(gs.nobleDeck.shift());
+        }
+
+        // Fast Noble (v7): Collect an additional noble immediately from the front of the line
+        if (noble.key === 'v7' && gs.lineUp.length > 0) {
+            const extraNoble = gs.lineUp.shift();
+            currentPlayer.collection.push(extraNoble);
+            updateScoreForNoble(currentPlayer, extraNoble, gs);
+        }
+
+        // Robespierre (v12): Forces immediate day end
+        if (noble.key === 'v12') {
+            gs.dayEndedEarly = true;
+        }
+    }
+
+    // Check if an action card (like Scarlet Pimpernel a43) or Robespierre triggered early day end
+    if (gs.dayEndedEarly) {
+        gs.discard.push(...gs.lineUp.splice(0)); // Discard remaining nobles in line
+        gs.dayEndedEarly = false; // Reset trigger flag
+    }
+
+    // 2. Draw a standard Action Card at the end of the turn phase
     if (gs.actionDeck.length > 0) {
         currentPlayer.hand.push(gs.actionDeck.shift());
     }
 
-    // 3. Turn Rotation
-    gs.turnIndex = (gs.turnIndex + 1) % room.players.length;
+    // 3. Turn Rotation Setup & Double Feature (a10) Handling
+    if (currentPlayer.extraNoble) {
+        currentPlayer.extraNoble = false; // Consume effect
+        currentPlayer.actions = 1;        // Replenish action point for their immediate consecutive turn
+        console.log(`${currentPlayer.nickname} takes an extra turn via Double Feature.`);
+        // Note: gs.turnIndex is NOT incremented, keeping it current player's turn!
+    } else {
+        // Normal turn pass rotation
+        gs.turnIndex = (gs.turnIndex + 1) % room.players.length;
+        const nextPlayer = room.players[gs.turnIndex];
+        
+        // Check if next player was targeted by Rush Job (a42)
+        if (nextPlayer.skipNextAction) {
+            nextPlayer.actions = 0; // Skip action phase
+            nextPlayer.skipNextAction = false; // Reset modifier
+            console.log(`${nextPlayer.nickname}'s action phase skipped via Rush Job.`);
+        } else {
+            nextPlayer.actions = 1; // Replenish action standard
+        }
+    }
 
-    const nextPlayer = room.players[gs.turnIndex];
-    nextPlayer.actions =  1;
-
-    // 4. Check for End of Day
+    // 4. Check for End of Day (Either line is empty naturally or cleared by forced card effects)
     if (gs.lineUp.length === 0) {
         if (gs.day < 3) {
             gs.day += 1;
-            gs.lineUp = gs.nobleDeck.splice(0, 12);
+            gs.lineUp = gs.nobleDeck.splice(0, 12); // Deal out next 12 cards
+            
+            // Reset actions for whomever's turn it actually is to start the new day
+            room.players.forEach(p => { p.actions = 0; });
+            room.players[gs.turnIndex].actions = 1; 
+
             io.to(code).emit("new-day", { day: gs.day });
+            console.log(`Day ended. Transitioning to Day ${gs.day}`);
         } else {
+            console.log("Day 3 finished. Game Over!");
             io.to(code).emit("game-over", { players: room.players });
             return;
         }
     }
 
+    // 5. Broadcast complete state update to all room occupants
     io.to(code).emit("game-state-update", {
         players: room.players,
         ...room.gameState
@@ -540,32 +635,34 @@ io.on("connection", (socket) => {
     if (!room || !room.gameStarted) return;
 
     room.lastActivity = Date.now(); 
-
     const gs = room.gameState;
     const player = room.players[gs.turnIndex];
 
-
     if (socket.id !== player.id) return;
+    
+    // Rule Check: Skip next action modifier
+    if (player.skipNextAction) {
+      player.skipNextAction = false;
+      socket.emit("error", "Your action phase was skipped this turn by an enemy card!");
+      return;
+    }
 
     if (player.actions <= 0) {
       socket.emit("error", "No actions remaining this turn.");
       return;
     }
 
-
     const index = player.hand.findIndex(c => c.instanceId === instanceId);
     if (index === -1) return;
 
-    const card = player.hand.splice(index, 1)[0];
+    // Pull card from hand
+    const [card] = player.hand.splice(index, 1);
 
     resolveActionCard({ room, player, card, target });
 
-    if (!player.extraAction) {
-      player.actions -= 1;
-    } else {
-      player.actions = 1;
-      player.extraAction = false;
-    }
+    // Deduct action cost safely
+    player.actions -= 1;
+    if (player.actions < 0) player.actions = 0;
 
     io.to(code).emit("game-state-update", {
       players: room.players,
