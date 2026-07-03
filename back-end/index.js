@@ -363,7 +363,8 @@ io.on("connection", (socket) => {
       // If room doesn't exist, we create it (normalized)
       rooms[code] = {
         players: [],
-        gameStarted: false
+        gameStarted: false,
+        lastActivity: Date.now()
       };
     }
 
