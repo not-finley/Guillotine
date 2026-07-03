@@ -20,17 +20,16 @@ jobs:
         # 1. Create the application target directory if it doesn't exist
         mkdir -p ~/apps/guillotine
         
-        # 2. Sync the repository files from the runner workspace to the app folder
-        # (Excluding the hidden .git metadata to keep it clean)
+        # 2. Sync everything over (this brings over front-end and back-end)
         rsync -av --exclude='.git' ./ ~/apps/guillotine/
         
-        # 3. Navigate to the app folder
-        cd ~/apps/guillotine
+        # 3. CRUCIAL: Navigate directly into the back-end folder where package.json is
+        cd ~/apps/guillotine/back-end
         
-        # 4. Install production dependencies cleanly
-        npm install --production
+        # 4. Clean install production dependencies using the updated flag
+        npm install --omit=dev
         
-        # 5. Tell PM2 to gracefully swap out the old backend instance for the new one
+        # 5. Tell PM2 to start the app from within the back-end folder
         pm2 delete guillotine-backend || true
-        pm2 start ./back-end/index.js --name "guillotine-backend"
+        pm2 start index.js --name "guillotine-backend"
         pm2 save
