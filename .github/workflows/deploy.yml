@@ -1,0 +1,36 @@
+name: Deploy Guillotine Backend
+
+on:
+  push:
+    branches:
+      - main  # Triggers the deployment whenever you push to the main branch
+
+jobs:
+  deploy:
+    runs-on: self-hosted  # Triggers the job directly on your Fedora mini-server
+
+    steps:
+    # Step 1: Pulls the updated repository code into the runner's workspace
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # Step 2: Moves the files to your apps directory, installs dependencies, and restarts PM2
+    - name: Local Build and Restart
+      run: |
+        # 1. Create the application target directory if it doesn't exist
+        mkdir -p ~/apps/guillotine
+        
+        # 2. Sync the repository files from the runner workspace to the app folder
+        # (Excluding the hidden .git metadata to keep it clean)
+        rsync -av --exclude='.git' ./ ~/apps/guillotine/
+        
+        # 3. Navigate to the app folder
+        cd ~/apps/guillotine
+        
+        # 4. Install production dependencies cleanly
+        npm install --production
+        
+        # 5. Tell PM2 to gracefully swap out the old backend instance for the new one
+        pm2 delete guillotine-backend || true
+        pm2 start ./back-end/index.js --name "guillotine-backend"
+        pm2 save
