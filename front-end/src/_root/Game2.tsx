@@ -49,7 +49,9 @@ const Game2 = () => {
     const { roomCode } = useParams<{ roomCode: string }>();
     const [focusCard, setFocusCard] = useState<any>(null);
     const [viewPlayer, setViewPlayer] = useState<any>(null);
-    const [selectedAction, setSelectedAction] = useState<null | { card: any, validTargets: number[] | string[] }>(null);
+    const [selectedAction, setSelectedAction] = useState<null | { card: any, validTargets: (number | string)[] }>(null);
+    const [isLogExpanded, setIsLogExpanded] = useState(false);
+
 
     const nickname = location.state?.nickname || localStorage.getItem("nickname");
 
@@ -59,6 +61,9 @@ const Game2 = () => {
     const isMyTurn = activePlayer?.nickname === nickname;
     const handCards = me?.hand || [];
     const focusedHandIndex = focusCard ? handCards.findIndex((c: any) => c.instanceId === focusCard.instanceId) : -1;
+
+    const logs: string[] = gameState?.actionLog || [];
+    const latestAction = logs[0] || null;
 
     // Handle Keyboard Navigation within modal focusing
     useEffect(() => {
@@ -83,6 +88,7 @@ const Game2 = () => {
 
         const handleUpdate = (data: any) => {
             setGameState(data);
+            console.log(data)
         };
 
         const handleGameOver = (data: { players: any[] }) => {
@@ -109,6 +115,7 @@ const Game2 = () => {
             socket.off("connect", handleConnect);
         };
     }, [roomCode, nickname]);
+
 
     if (gameOverData) {
         return (
@@ -273,15 +280,17 @@ const Game2 = () => {
             )}
 
             {/* Main Line Up Grid Area */}
-            <div className="relative flex-1 flex flex-col justify-center items-center w-full min-h-[250px]">
+            <div className="relative flex-1 flex flex-col justify-center items-center w-full min-h-[250px] p-4">
                 <div className="absolute left-10 top-1/2 -translate-y-1/2 -rotate-90 origin-left hidden lg:block select-none pointer-events-none">
                     <div className="text-8xl font-black text-gray-400 tracking-tighter opacity-[0.03] uppercase">Guillotine</div>
                 </div>
 
-                <div className="flex items-center justify-center w-full max-w-7xl px-4">
-                    <div className="flex items-center justify-center -space-x-14 sm:-space-x-12 md:space-x-2 lg:space-x-4 transition-all duration-500">
+                <div className="w-full max-w-4xl px-2">
+                    {/* Force a strict 5-column grid layout across all viewports with centered grid tracks */}
+                    <div className="grid grid-cols-6 gap-2 sm:gap-4 justify-items-center items-center transition-all duration-500">
                         {gameState.lineUp.map((head: any, i: number) => {
-                            const isTargetable = isNumberArray(selectedAction?.validTargets) && selectedAction.validTargets.includes(i);
+                            const isTargetable = Array.isArray(selectedAction?.validTargets) && selectedAction.validTargets.includes(i);
+                            
                             return (
                                 <div
                                     key={head.instanceId}
@@ -298,27 +307,98 @@ const Game2 = () => {
                                             setFocusCard(head);
                                         }
                                     }}
-                                    className={`relative flex-shrink-0 w-24 h-36 sm:w-32 sm:h-44 rounded-xl cursor-pointer transition-all duration-300 ease-out hover:mx-10 sm:hover:mx-12 md:hover:mx-2 hover:-translate-y-8 hover:z-50 hover:scale-110 ${isTargetable ? 'border-4 border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.8)] scale-105 z-50 animate-pulse' : ''} ${i === 0 && isMyTurn && !selectedAction ? 'z-40 border-4 border-yellow-400 shadow-[0_0_40px_rgba(250,204,21,0.6)] scale-105' : 'z-10 shadow-xl'}`}
-                                    style={{ transform: i === 0 && isMyTurn ? 'none' : `rotate(${(i % 2 === 0 ? 1 : -1) * 2}deg)` }}
+                                    /* max-w scales card components safely from ultra-small mobile up to clean desktop proportions */
+                                    className={`relative w-full aspect-[2/3] max-w-[70px] sm:max-w-[110px] md:max-w-[130px] rounded-xl cursor-pointer transition-all duration-300 ease-out 
+                                        hover:-translate-y-4 hover:scale-110
+                                        ${isTargetable ? 'border-4 border-blue-500 shadow-[0_0_20px_rgba(59,130,246,0.8)] scale-105 z-50 animate-pulse' : ''} 
+                                        ${i === 0 && isMyTurn && !selectedAction ? 'z-40 border-4 border-yellow-400 shadow-[0_0_25px_rgba(250,204,21,0.6)] scale-105' : 'z-10 shadow-md md:shadow-xl'}`}
+                                    style={{ 
+                                        transform: i === 0 && isMyTurn 
+                                            ? 'none' 
+                                            : `rotate(${(i % 2 === 0 ? 1 : -1) * 2}deg)` 
+                                    }}
                                 >
+                                    {/* Chop Indicator Tag */}
                                     {i === 0 && (
-                                        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-yellow-400 text-black px-3 py-0.5 text-[9px] font-black rounded-full animate-bounce z-50 shadow-md uppercase tracking-wider">CHOP</div>
+                                        <div className="absolute -top-7 md:-top-9 left-1/2 -translate-x-1/2 bg-yellow-400 text-black px-1.5 py-0.5 text-[8px] md:text-[10px] font-black rounded-full animate-bounce z-50 shadow-md uppercase tracking-wider whitespace-nowrap">
+                                            CHOP
+                                        </div>
                                     )}
-                                    <img src={`/assets/cards/images/${head.key}.jpeg`} alt={head.name} className="w-full h-full object-cover rounded-xl border border-white/10 brightness-110" onError={(e) => { e.currentTarget.src = "/assets/cards/card-back.png"; }} />
+                                    
+                                    {/* Card Graphic */}
+                                    <img 
+                                        src={`/assets/cards/images/${head.key}.jpeg`} 
+                                        alt={head.name} 
+                                        className="w-full h-full object-cover rounded-xl border border-white/10 brightness-110 select-none" 
+                                        onError={(e) => { e.currentTarget.src = "/assets/cards/card-back.png"; }} 
+                                    />
+                                    
+                                    {/* Dynamic index numbering to identify positioning sequence perfectly on every screen */}
+                                    <div className="absolute bottom-1 left-1 bg-black/70 text-[8px] sm:text-[10px] font-bold text-white px-1.5 py-0.5 rounded">
+                                        #{i + 1}
+                                    </div>
                                 </div>
                             );
                         })}
                     </div>
                 </div>
 
-                {/* ADDED: Global Match Action Activity Log Notification Feed Marquee */}
-                {gameState.lastAction && (
-                    <div className="mt-6 bg-zinc-950/80 border border-zinc-800 rounded-full px-6 py-2 shadow-2xl flex items-center gap-3 animate-fade-in max-w-xl mx-auto backdrop-blur-sm">
-                        <span className="flex h-2 w-2 rounded-full bg-red-500 animate-ping" />
-                        <p className="text-xs tracking-wide text-zinc-300 font-medium">
-                            <span className="text-zinc-500 uppercase font-bold mr-1.5">Latest:</span> 
-                            {gameState.lastAction}
-                        </p>
+                {/* Match Feed Action Feed */}
+                {latestAction && (
+                    <div className="w-full max-w-md mx-auto px-4 mt-6 z-50 relative">
+                        <div 
+                            onClick={() => setIsLogExpanded(!isLogExpanded)}
+                            className={`bg-zinc-950/90 border border-zinc-800 shadow-2xl backdrop-blur-md transition-all duration-300 cursor-pointer hover:border-zinc-700
+                                ${isLogExpanded ? 'rounded-2xl p-4' : 'rounded-full px-5 py-2 flex items-center justify-between gap-3'}`}
+                        >
+                            {!isLogExpanded ? (
+                                <>
+                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                        <span className="flex h-2 w-2 relative shrink-0">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                                        </span>
+                                        <p className="text-xs tracking-wide text-zinc-300 font-medium truncate">
+                                            <span className="text-zinc-500 uppercase font-bold mr-1.5">Latest:</span> 
+                                            {latestAction}
+                                        </p>
+                                    </div>
+                                    <button className="text-[10px] uppercase font-black text-red-400 tracking-wider hover:text-red-300 transition shrink-0 pl-2">
+                                        History ({logs.length})
+                                    </button>
+                                </>
+                            ) : (
+                                <div className="flex flex-col w-full animate-fade-in">
+                                    <div className="flex items-center justify-between border-b border-zinc-800 pb-2 mb-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="h-1.5 w-1.5 rounded-full bg-red-500"></span>
+                                            <h4 className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest">Execution Registry</h4>
+                                        </div>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); setIsLogExpanded(false); }}
+                                            className="text-[10px] uppercase font-black text-zinc-500 hover:text-zinc-300 transition tracking-wider"
+                                        >
+                                            Minimize
+                                        </button>
+                                    </div>
+
+                                    <div className="max-h-40 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                                        {logs.map((log: string, idx: number) => (
+                                            <div 
+                                                key={idx} 
+                                                className={`text-xs tracking-wide py-1 border-l-2 pl-3 ${
+                                                    idx === 0 
+                                                        ? 'text-zinc-100 border-red-500 font-medium bg-red-950/20 rounded-r' 
+                                                        : 'text-zinc-400 border-zinc-800 font-normal'
+                                                }`}
+                                            >
+                                                {log}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>

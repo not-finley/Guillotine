@@ -443,7 +443,8 @@ io.on("connection", (socket) => {
       actionDeck: actionDeck,
       discard: [],
       turnIndex: 0,
-      day: 1
+      day: 1, 
+      actionLog: ["The match has begun! Viva la Revolución!"]
     };
 
     // 5. Deal 5 action cards to each player
@@ -474,17 +475,27 @@ io.on("connection", (socket) => {
     let currentPlayer = room.players[gs.turnIndex];
     if (socket.id !== currentPlayer.id) return;
 
+    // Fallback array initialization to safeguard against server exceptions
+    if (!Array.isArray(gs.actionLog)) {
+        gs.actionLog = [];
+    }
+
+    let actionsTakenText = [];
+    let earlyDayFledText = "";
+
     // --- 0. CONFUSION IN LINE (a9) ---
     if (currentPlayer.triggerLineShuffleNextTurn) {
         gs.lineUp.sort(() => Math.random() - 0.5);
         currentPlayer.triggerLineShuffleNextTurn = false;
         console.log(`Line randomized by Confusion in Line for ${currentPlayer.nickname}!`);
+        actionsTakenText.push("The lineup was shuffled by Confusion in Line!");
     }
 
     // Guard: Check if a card effect forces the player to skip collecting a noble (e.g., a37)
     if (currentPlayer.skipNobleThisTurn) {
         currentPlayer.skipNobleThisTurn = false; // Reset modifier
         console.log(`${currentPlayer.nickname} skipped noble collection due to card effect.`);
+        gs.actionLog.unshift(`${currentPlayer.nickname} skipped their execution phase due to an action card restriction.`);
     } else if (gs.lineUp.length > 0) {
         // 1. Collect the noble at the front of the line
         const noble = gs.lineUp.shift();
@@ -496,13 +507,16 @@ io.on("connection", (socket) => {
             victim.collection.push(noble);
             updateScoreForNoble(victim, noble, gs);
             console.log(`Clown collected! Passed to ${victim.nickname}'s score pile.`);
+            actionsTakenText.push(`${currentPlayer.nickname} chopped The Clown, passing them to ${victim.nickname}!`);
         } else {
             currentPlayer.collection.push(noble);
             updateScoreForNoble(currentPlayer, noble, gs);
+            actionsTakenText.push(`${currentPlayer.nickname} executed ${noble.name} (${noble.value >= 0 ? '+' : ''}${noble.value} pts).`);
             
             // Handle Innocent Victim (g2): must discard an action card from hand
             if (noble.key === 'g2') {
                 currentPlayer.mustDiscardActionCount = (currentPlayer.mustDiscardActionCount || 0) + 1;
+                actionsTakenText.push(`Innocent Victim forces ${currentPlayer.nickname} to discard an action card.`);
             }
         }
 
@@ -512,6 +526,7 @@ io.on("connection", (socket) => {
         if (['v2', 'v8', 'v9'].includes(noble.key)) {
             if (gs.actionDeck.length > 0) {
                 currentPlayer.hand.push(gs.actionDeck.shift());
+                actionsTakenText.push(`${noble.name}'s effect triggers: ${currentPlayer.nickname} draws an action card.`);
             }
         }
         
@@ -520,11 +535,14 @@ io.on("connection", (socket) => {
             const bonusNoble = gs.nobleDeck.shift();
             currentPlayer.collection.push(bonusNoble);
             updateScoreForNoble(currentPlayer, bonusNoble, gs);
+            actionsTakenText.push(`Rival Executioner trigger! ${currentPlayer.nickname} also claims ${bonusNoble.name} (${bonusNoble.value >= 0 ? '+' : ''}${bonusNoble.value} pts) from the deck.`);
         }
 
         // Captain of the Guard (r3), General (r5): Add a noble from deck to the end of the line
         if (['r3', 'r5'].includes(noble.key) && gs.nobleDeck.length > 0) {
-            gs.lineUp.push(gs.nobleDeck.shift());
+            const addedNoble = gs.nobleDeck.shift();
+            gs.lineUp.push(addedNoble);
+            actionsTakenText.push(`${noble.name} calls reinforcements: ${addedNoble.name} added to the end of the line.`);
         }
 
         // Fast Noble (v7): Collect an additional noble immediately from the front of the line
@@ -532,6 +550,7 @@ io.on("connection", (socket) => {
             const extraNoble = gs.lineUp.shift();
             currentPlayer.collection.push(extraNoble);
             updateScoreForNoble(currentPlayer, extraNoble, gs);
+            actionsTakenText.push(`Fast Noble trigger! ${currentPlayer.nickname} immediately executes the next noble in line: ${extraNoble.name}.`);
         }
 
         // Robespierre (v12): Forces immediate day end
@@ -542,8 +561,10 @@ io.on("connection", (socket) => {
 
     // Check if an action card (like Scarlet Pimpernel a43) or Robespierre triggered early day end
     if (gs.dayEndedEarly) {
+        const discardedCount = gs.lineUp.length;
         gs.discard.push(...gs.lineUp.splice(0)); // Discard remaining nobles in line
         gs.dayEndedEarly = false; // Reset trigger flag
+        earlyDayFledText = ` Early Day End! ${discardedCount} remaining nobles fled to the discard pile.`;
     }
 
     // 2. Draw a standard Action Card at the end of the turn phase
@@ -552,11 +573,12 @@ io.on("connection", (socket) => {
     }
 
     // 3. Turn Rotation Setup & Double Feature (a10) Handling
+    let turnStatusText = "";
     if (currentPlayer.extraNoble) {
         currentPlayer.extraNoble = false; // Consume effect
         currentPlayer.actions = 1;        // Replenish action point for their immediate consecutive turn
         console.log(`${currentPlayer.nickname} takes an extra turn via Double Feature.`);
-        // Note: gs.turnIndex is NOT incremented, keeping it current player's turn!
+        turnStatusText = ` Double Feature! It is still ${currentPlayer.nickname}'s turn.`;
     } else {
         // Normal turn pass rotation
         gs.turnIndex = (gs.turnIndex + 1) % room.players.length;
@@ -567,8 +589,10 @@ io.on("connection", (socket) => {
             nextPlayer.actions = 0; // Skip action phase
             nextPlayer.skipNextAction = false; // Reset modifier
             console.log(`${nextPlayer.nickname}'s action phase skipped via Rush Job.`);
+            turnStatusText = ` Next up: ${nextPlayer.nickname} (Action Phase skipped by Rush Job).`;
         } else {
             nextPlayer.actions = 1; // Replenish action standard
+            turnStatusText = ` Next up: ${nextPlayer.nickname}.`;
         }
     }
 
@@ -582,13 +606,31 @@ io.on("connection", (socket) => {
             room.players.forEach(p => { p.actions = 0; });
             room.players[gs.turnIndex].actions = 1; 
 
+            // Unshift unified text summary block of everything that transpired this phase to history
+            const baseTurnSummary = actionsTakenText.join(" ");
+            gs.actionLog.unshift(`${baseTurnSummary}${earlyDayFledText} Day completed! Transitioning to Day ${gs.day}. 12 new nobles placed in line.`);
+
             io.to(code).emit("new-day", { day: gs.day });
             console.log(`Day ended. Transitioning to Day ${gs.day}`);
         } else {
             console.log("Day 3 finished. Game Over!");
+            
+            const baseTurnSummary = actionsTakenText.join(" ");
+            gs.actionLog.unshift(`${baseTurnSummary}${earlyDayFledText} Day 3 is over! The game has finished.`);
+            
             io.to(code).emit("game-over", { players: room.players });
+            
+            // Broadcast state update before returning to render end results smoothly
+            io.to(code).emit("game-state-update", {
+                players: room.players,
+                ...room.gameState
+            });
             return;
         }
+    } else {
+        // If the lineup is not empty, compile the turn sequence strings normally
+        const baseTurnSummary = actionsTakenText.join(" ");
+        gs.actionLog.unshift(`${baseTurnSummary}${earlyDayFledText}${turnStatusText}`);
     }
 
     // 5. Broadcast complete state update to all room occupants
@@ -596,7 +638,7 @@ io.on("connection", (socket) => {
         players: room.players,
         ...room.gameState
     });
-  });
+});
 
   socket.on("request-game-state", ({ roomCode, nickname }) => {
     const code = roomCode?.toUpperCase();
@@ -658,6 +700,8 @@ io.on("connection", (socket) => {
     const [card] = player.hand.splice(index, 1);
 
     resolveActionCard({ room, player, card, target });
+
+    gs.actionLog.unshift(`${player.nickname} played action card: "${card.name}".`);
 
     // Deduct action cost safely
     player.actions -= 1;
