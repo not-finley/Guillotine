@@ -13,6 +13,9 @@ function resolveActionCard({ room, player, card, target }) {
   const gs = room.gameState;
   if (!gs) return;
 
+  const isComplexTarget = target && typeof target === "object";
+  const targetIdx = isComplexTarget ? target.index : target;
+
   // Handle cards that attach to a player's tableau area permanently
   const tableauCards = ["a3", "a4", "a6", "a16", "a18", "a21", "a32"];
   if (tableauCards.includes(card.key)) {
@@ -257,74 +260,53 @@ function resolveActionCard({ room, player, card, target }) {
 
     // --- Index-Based Targeting Mechanics ---
     case "a5": { // Civic Pride (Move Green noble forward up to 2 places)
-      if (gs.lineUp[target]?.color === "green") moveInLine(gs.lineUp, target, 2);
-      break;
-    }
-    case "a8": { // Clothing Swap (Discard any noble in line, replace with deck top)
-      if (target >= 0 && target < gs.lineUp.length) {
-        gs.lineUp.splice(target, 1);
-        if (gs.nobleDeck.length > 0) {
-          gs.lineUp.splice(target, 0, gs.nobleDeck.shift());
-        }
+      if (gs.lineUp[targetIdx]?.color === "green") {
+        const dist = isComplexTarget ? target.distance : 2;
+        moveInLine(gs.lineUp, targetIdx, dist);
       }
       break;
     }
     case "a13": { // Fainting Spell (Move noble backward up to 3 places)
-      moveInLine(gs.lineUp, target, -3);
-      break;
-    }
-    case "a14": { // Fled to England (Discard any noble in line)
-      if (target >= 0 && target < gs.lineUp.length) gs.lineUp.splice(target, 1);
+      const dist = isComplexTarget ? target.distance : -3; // negative is backward
+      moveInLine(gs.lineUp, targetIdx, dist);
       break;
     }
     case "a19": { // Friend of the Queen (Move noble backward up to 2 places)
-      moveInLine(gs.lineUp, target, -2);
-      break;
-    }
-    case "a20": { // Ignoble Noble (Move noble forward exactly 4 places)
-      moveInLine(gs.lineUp, target, 4);
+      const dist = isComplexTarget ? target.distance : -2;
+      moveInLine(gs.lineUp, targetIdx, dist);
       break;
     }
     case "a28": { // L'Idiot (Move noble forward up to 2 places)
-      moveInLine(gs.lineUp, target, 2);
+      const dist = isComplexTarget ? target.distance : 2;
+      moveInLine(gs.lineUp, targetIdx, dist);
       break;
     }
     case "a29": { // Majesty (Move Purple noble forward up to 2 places)
-      if (gs.lineUp[target]?.color === "violet") moveInLine(gs.lineUp, target, 2);
-      break;
-    }
-    case "a31": { // Military Might (Move Red noble forward up to 2 places)
-      if (gs.lineUp[target]?.color === "red") moveInLine(gs.lineUp, target, 2);
-      break;
-    }
-    case "a38": { // Public Demand (Move any noble in line to the front)
-      if (target >= 0 && target < gs.lineUp.length) {
-        const [chosenNoble] = gs.lineUp.splice(target, 1);
-        gs.lineUp.unshift(chosenNoble);
+      if (gs.lineUp[targetIdx]?.color === "violet") {
+        const dist = isComplexTarget ? target.distance : 2;
+        moveInLine(gs.lineUp, targetIdx, dist);
       }
       break;
     }
-    case "a39": { // Pushed (Move noble forward exactly 2 places)
-      moveInLine(gs.lineUp, target, 2);
-      break;
-    }
-    case "a44": { // Stumble (Move noble forward exactly 1 place)
-      moveInLine(gs.lineUp, target, 1);
-      break;
-    }
-    case "a46": { // 'Tis a Far Better Thing (Move noble forward exactly 3 places)
-      moveInLine(gs.lineUp, target, 3);
-      break;
-    }
-    case "a48": { // Trip (Move noble backward exactly 1 place, grant another action)
-      moveInLine(gs.lineUp, target, -1);
-      player.actions += 1; // Compensate action point to allow extra chain plays
+    case "a31": { // Military Might (Move Red noble forward up to 2 places)
+      if (gs.lineUp[targetIdx]?.color === "red") {
+        const dist = isComplexTarget ? target.distance : 2;
+        moveInLine(gs.lineUp, targetIdx, dist);
+      }
       break;
     }
     case "a50": { // Was That My Name? (Move noble forward up to 3 places)
-      moveInLine(gs.lineUp, target, 3);
+      const dist = isComplexTarget ? target.distance : 3;
+      moveInLine(gs.lineUp, targetIdx, dist);
       break;
     }
+
+    // --- Keep all other fixed explicit distance cases exactly the same (a20, a39, a44, a46, a48 etc.) ---
+    case "a20": { moveInLine(gs.lineUp, targetIdx, 4); break; }
+    case "a39": { moveInLine(gs.lineUp, targetIdx, 2); break; }
+    case "a44": { moveInLine(gs.lineUp, targetIdx, 1); break; }
+    case "a46": { moveInLine(gs.lineUp, targetIdx, 3); break; }
+    case "a48": { moveInLine(gs.lineUp, targetIdx, -1); player.actions += 1; break; }
     default:
       console.log(`Card handling generic or empty for: ${card.key}`);
       break;

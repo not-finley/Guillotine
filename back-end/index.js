@@ -65,227 +65,6 @@ const createDecks = () => {
   };
 };
 
-function discardCard(gs, card, meta = {}) {
-  if (!gs || !card) return;
-
-  gs.discard.push({
-    ...card,
-    discardedAt: Date.now(),
-    ...meta
-  });
-}
-
-
-function moveInLine(line, index, distance) {
-  if (!Array.isArray(line)) return;
-  if (index < 0 || index >= line.length) return;
-  if (distance === 0) return;
-
-  const newIndex = Math.max(0, Math.min(line.length - 1, index - distance));
-
-  const [card] = line.splice(index, 1);
-  line.splice(newIndex, 0, card);
-}
-
-function moveLineEffect({ gs, index, distance, conditionFn }) {
-  if (index === undefined || index < 0 || index >= gs.lineUp.length) return;
-  if (conditionFn && !conditionFn(gs.lineUp[index])) return;
-  moveInLine(gs.lineUp, index, distance);
-}
-
-function discardFromHand(gs, player, instanceId) {
-  const index = player.hand.findIndex(c => c.instanceId === instanceId);
-  if (index === -1) return null;
-
-  const [card] = player.hand.splice(index, 1);
-  discardCard(gs, card);
-  return card;
-}
-
-function discardFromLine(gs, index) {
-  if (index < 0 || index >= gs.lineUp.length) return null;
-
-  const [card] = gs.lineUp.splice(index, 1);
-  discardCard(gs, card);
-  return card;
-}
-
-function discardRandomFromHand(gs, player) {
-  if (!player.hand.length) return null;
-
-  const index = Math.floor(Math.random() * player.hand.length);
-  const [card] = player.hand.splice(index, 1);
-  discardCard(gs, card);
-  return card;
-}
-
-function discardRandomFromLine(gs) {
-  if (!gs.lineUp.length) return null; 
-
-  const index = Math.floor(Math.random() * gs.lineUp.length);
-  const [card] = gs.lineUp.splice(index, 1);
-  discardCard(gs, card);
-  return card;
-}
-
-function discardFromTableau(gs, player, instanceId) {
-  const index = player.tableau.findIndex(c => c.instanceId === instanceId);
-  if (index === -1) return null;
-
-  const [card] = player.tableau.splice(index, 1);
-  discardCard(gs, card);
-  return card;
-}
-
-
-function reshuffleDiscardIntoDeck(gs) {
-  gs.actionDeck = shuffle([...gs.actionDeck, ...gs.discard]);
-  gs.discard = [];
-}
-
-const actionCardEffects = {
-  // Give a noble from lineup to a target player
-  a1: ({ gs, room, target, card }) => {
-    if (!gs.lineUp.length) return;
-    const victim = room.players.find(p => p.nickname === target);
-    if (!victim) return;
-    const noble = gs.lineUp.shift();
-    victim.collection.push(noble);
-    victim.score += noble.value;
-  },
-
-  // Rotate lineup
-  a2: ({ gs, card }) => {
-    if (gs.lineUp.length) gs.lineUp.push(gs.lineUp.shift());
-  },
-
-  // Move a green card
-  a5: ({ gs, target }) => moveLineEffect({ gs, ...target, conditionFn: c => isColor(c, "green") }),
-
-  // Replace a noble in line with new one from deck
-  a8: ({ gs, target, card }) => {
-    const removed = discardFromLine(gs, target);
-    if (!removed || !gs.nobleDeck.length) return;
-    gs.lineUp.splice(target, 0, gs.nobleDeck.shift());
-  },
-
-  // Extra noble for player
-  a10: ({ player }) => player.extraNoble = true,
-
-  // Discard two random nobles and shuffle lineup
-  a11: ({ gs }) => {
-    discardRandomFromLine(gs);
-    discardRandomFromLine(gs);
-    shuffle(gs.lineUp);
-  },
-
-  // Reverse the lineup (a45)
-  a45: ({ gs }) => {
-    gs.lineUp.reverse();
-  },
-
-  // Shuffle first 5 nobles (a33)
-  a33: ({ gs }) => {
-    const sub = gs.lineUp.splice(0, 5);
-    shuffleArrayInPlace(sub);
-    gs.lineUp.unshift(...sub);
-  },
-
-  // Draw 3 extra action cards and skip noble collection (a37)
-  a37: ({ gs, player }) => {
-    for (let i = 0; i < 3; i++) {
-      if (gs.actionDeck.length === 0) reshuffleDiscardIntoDeck(gs);
-      if (gs.actionDeck.length) player.hand.push(gs.actionDeck.shift());
-    }
-    player.skipNobleThisTurn = true;
-  },
-
-  // Shuffle all players' hands into action deck and redeal (a40)
-  a40: ({ gs, room }) => {
-    room.players.forEach(p => gs.actionDeck.push(...p.hand.splice(0)));
-    shuffleArrayInPlace(gs.actionDeck);
-    room.players.forEach(p => {
-      for (let i = 0; i < 5 && gs.actionDeck.length; i++) {
-        p.hand.push(gs.actionDeck.shift());
-      }
-    });
-  },
-
-  // Pick an action card from discard pile (a41)
-  a41: ({ gs, player }) => {
-    if (!gs.discard.length) return;
-    const index = Math.floor(Math.random() * gs.discard.length);
-    const [card] = gs.discard.splice(index, 1);
-    player.hand.push(card);
-  },
-
-  // Target player cannot play an action next turn (a42)
-  a42: ({ room, target }) => {
-    const victim = room.players.find(p => p.nickname === target);
-    if (!victim) return;
-    victim.skipNextAction = true;
-  },
-
-  // End day and discard remaining nobles (a43)
-  a43: ({ gs }) => {
-    gs.discard.push(...gs.lineUp.splice(0));
-    gs.dayEndedEarly = true;
-  },
-
-  // Negative support card (a47)
-  a47: ({ room, target }) => {
-    const victim = room.players.find(p => p.nickname === target);
-    if (!victim) return;
-    victim.score -= 2;
-  },
-
-  // Discard a target action card from any player (a49)
-  a49: ({ gs, room, target }) => {
-    const victim = room.players.find(p => p.nickname === target.player);
-    if (!victim) return;
-    discardFromHand(gs, victim, target.instanceId);
-  },
-
-  // Move line backwards
-  a13: ({ gs, target }) => moveLineEffect({ gs, ...target, distance: -target.distance }),
-  a19: ({ gs, target }) => moveLineEffect({ gs, ...target, distance: -target.distance }),
-
-  // Move line forward fixed distance
-  a20: ({ gs, target }) => moveLineEffect({ gs, index: target, distance: 4 }),
-  a28: ({ gs, target }) => moveLineEffect({ gs, ...target }),
-  a50: ({ gs, target }) => moveLineEffect({ gs, ...target }),
-
-  // Conditional move by color
-  a29: ({ gs, target }) => moveLineEffect({ gs, ...target, conditionFn: c => isColor(c, 'violet') }),
-  a31: ({ gs, target }) => moveLineEffect({ gs, ...target, conditionFn: c => isColor(c, 'red') }),
-
-  // Move line to start or far position
-  a38: ({ gs, target }) => moveLineEffect({ gs, index: target, distance: 999 }),
-  a39: ({ gs, targetIndex }) => moveLineEffect({ gs, index: targetIndex, distance: 2 }),
-  a44: ({ gs, target }) => moveLineEffect({ gs, index: target, distance: 1 }),
-  a46: ({ gs, target }) => moveLineEffect({ gs, index: target, distance: 3 }),
-  a48: ({ gs, target, player }) => {
-    moveLineEffect({ gs, index: target, distance: -1 });
-    player.extraAction = true;
-  },
-
-  // Discard a card from someone else's tableau
-  a49: ({ gs, room, target, card }) => {
-    const victim = room.players.find(p => p.nickname === target.player);
-    if (!victim) return;
-    discardFromTableau(gs, victim, target.instanceId);
-  },
-
-  // Place support cards in tableau
-  a4: ({ player, card }) => player.tableau.push(card),
-  a6: ({ player, card }) => player.tableau.push(card),
-  a16: ({ player, card }) => player.tableau.push(card),
-  a18: ({ player, card }) => player.tableau.push(card),
-  a21: ({ player, card }) => player.tableau.push(card),
-  a32: ({ player, card }) => player.tableau.push(card)
-};
-
-
 function updateScoreForNoble(player, noble, gameState) {
   // 1. Reset base score calculations to zero to run a clean, full-collection tally
   player.score = 0;
@@ -335,6 +114,61 @@ function updateScoreForNoble(player, noble, gameState) {
   // 7. Deduct negative points from attachment cards (e.g., Tough Crowd)
   const toughCrowdCount = player.tableau.filter(c => c.key === 'a47').length;
   player.score -= (toughCrowdCount * 2);
+}
+
+function recalculateAllScores(room) {
+  if (!room || !room.players) return;
+
+  room.players.forEach(player => {
+    // 1. Reset base score calculations to zero to run a clean, full-collection tally
+    player.score = 0;
+
+    // 2. Count types across your collected pile
+    const palaceGuards = player.collection.filter(c => c.key === 'r1').length;
+    const totalGray = player.collection.filter(c => c.color === 'gray').length;
+    
+    const hasCount = player.collection.some(c => c.key === 'v5');
+    const hasCountess = player.collection.some(c => c.key === 'v6');
+
+    // 3. Scan all tableau support cards affecting values
+    const hasIndifferentPublic = player.tableau.some(c => c.key === 'a21');
+    const churchSupportCount = player.tableau.filter(c => c.key === 'a4').length;
+    const civicSupportCount = player.tableau.filter(c => c.key === 'a6').length;
+    const militarySupportCount = player.tableau.filter(c => c.key === 'a32').length;
+
+    // 4. Score each individual head card
+    player.collection.forEach(n => {
+      if (typeof n.value === 'number') {
+        if (n.color === 'gray' && hasIndifferentPublic) {
+          player.score += 1; // a21 overrides negative gray cards to +1 point
+        } else {
+          player.score += n.value;
+        }
+      } else if (n.key === 'r1') {
+        // Palace guards score dynamically based on total quantity collected
+        player.score += palaceGuards;
+      } else if (n.key === 'g1') {
+        // Tragic figure: -1 point per gray noble in score pile
+        player.score -= totalGray;
+      }
+    });
+
+    // 5. Apply set bonuses (Count + Countess pairs)
+    if (hasCount && hasCountess) {
+      player.score += 4; // Both receive +2 extra bonus points
+    }
+
+    // 6. Apply permanent support multipliers from the player's tableau field
+    player.collection.forEach(n => {
+      if (n.color === 'blue') player.score += (churchSupportCount * 1);
+      if (n.color === 'green') player.score += (civicSupportCount * 1);
+      if (n.color === 'red') player.score += (militarySupportCount * 1);
+    });
+
+    // 7. Deduct negative points from attachment cards (e.g., Tough Crowd)
+    const toughCrowdCount = player.tableau.filter(c => c.key === 'a47').length;
+    player.score -= (toughCrowdCount * 2);
+  });
 }
 
 io.on("connection", (socket) => {
@@ -474,6 +308,11 @@ io.on("connection", (socket) => {
     const gs = room.gameState;
     let currentPlayer = room.players[gs.turnIndex];
     if (socket.id !== currentPlayer.id) return;
+
+    if (currentPlayer.mustDiscardActionCount > 0 && currentPlayer.hand.length > 0) {
+      socket.emit("error", "You must fulfill your pending Innocent Victim discard penalties before executing a noble!");
+      return;
+    }
 
     // Fallback array initialization to safeguard against server exceptions
     if (!Array.isArray(gs.actionLog)) {
@@ -681,6 +520,18 @@ io.on("connection", (socket) => {
 
     if (socket.id !== player.id) return;
     
+    // --- NOBLE RESTRICTION: Unpopular Judge (e4) ---
+    if (gs.lineUp.length > 0 && gs.lineUp[0].key === 'e4') {
+      socket.emit("error", "The Unpopular Judge is at the front of the line! No action cards can be played.");
+      return;
+    }
+
+    // --- NOBLE RESTRICTION: Innocent Victim Hand Block ---
+    if (player.mustDiscardActionCount > 0) {
+      socket.emit("error", "You must manually discard an action card to satisfy the Innocent Victim before playing cards.");
+      return;
+    }
+
     // Rule Check: Skip next action modifier
     if (player.skipNextAction) {
       player.skipNextAction = false;
@@ -701,7 +552,17 @@ io.on("connection", (socket) => {
 
     resolveActionCard({ room, player, card, target });
 
+    recalculateAllScores(room);
+
     gs.actionLog.unshift(`${player.nickname} played action card: "${card.name}".`);
+
+    // --- NOBLE RESTRICTION: Master Spy (r6) Trigger ---
+    const spyIdx = gs.lineUp.findIndex(n => n.key === 'r6');
+    if (spyIdx !== -1) {
+      const [spyCard] = gs.lineUp.splice(spyIdx, 1);
+      gs.lineUp.push(spyCard);
+      gs.actionLog.unshift("The Master Spy sneaks to the end of the line after an action card was played!");
+    }
 
     // Deduct action cost safely
     player.actions -= 1;
@@ -713,6 +574,31 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("discard-innocent-victim-penalty", ({ roomCode, instanceId }) => {
+    const code = roomCode.toUpperCase();
+    const room = rooms[code];
+    if (!room || !room.gameStarted) return;
+
+    const gs = room.gameState;
+    const player = room.players[gs.turnIndex];
+    if (socket.id !== player.id) return;
+
+    if (!player.mustDiscardActionCount || player.mustDiscardActionCount <= 0) return;
+
+    const cardIdx = player.hand.findIndex(c => c.instanceId === instanceId);
+    if (cardIdx !== -1) {
+      const [discarded] = player.hand.splice(cardIdx, 1);
+      gs.discard.push(discarded);
+      player.mustDiscardActionCount -= 1;
+      
+      gs.actionLog.unshift(`${player.nickname} discarded "${discarded.name}" to satisfy the Innocent Victim.`);
+      
+      io.to(code).emit("game-state-update", {
+        players: room.players,
+        ...room.gameState
+      });
+    }
+  });
 
   socket.on("get-players", ({roomCode}) => {
     console.log(`Outputing Players in room ${roomCode}`);
