@@ -366,12 +366,8 @@ io.on("connection", (socket) => {
     const code = inputCode.toUpperCase(); // We must use this 'code' everywhere below
 
     if (!rooms[code]) {
-      // If room doesn't exist, we create it (normalized)
-      rooms[code] = {
-        players: [],
-        gameStarted: false,
-        lastActivity: Date.now()
-      };
+      socket.emit("error", "This room code does not exist. Double check your code or create a new room!");
+      return;
     }
 
     const room = rooms[code];
@@ -400,6 +396,9 @@ io.on("connection", (socket) => {
     }
 
     socket.join(code);
+
+    socket.emit("join-success", code);
+    
     io.to(code).emit("update-players", room.players); 
     console.log(`Player ${nickname} joined Room ${code}`);
   });
