@@ -37,9 +37,6 @@ const actionCardConfig: Record<string, { requiresTarget?: boolean | "player" | "
   a50: { requiresTarget: "index" },   // Was That My Name?
 };
 
-function isNumberArray(arr: number[] | string[] | undefined): arr is number[] {
-    return Array.isArray(arr) && arr.every(item => typeof item === "number");
-}
 
 const Game2 = () => {
     const [gameState, setGameState] = useState<any>(null);
