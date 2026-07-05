@@ -213,7 +213,7 @@ io.on("connection", (socket) => {
 
   socket.on("join-room", ({ inputCode, nickname }) => {
     if (!inputCode) return;
-    const code = inputCode.toUpperCase(); 
+    const code = inputCode.toUpperCase();
 
     if (!rooms[code]) {
       socket.emit("error", "This room code does not exist. Double check your code or create a new room!");
@@ -223,15 +223,30 @@ io.on("connection", (socket) => {
     const room = rooms[code];
     const existingPlayer = room.players.find(p => p.nickname === nickname);
 
-
     if (existingPlayer) {
+      // DUPLICATE NICKNAME CHECK: 
+      // If the player is already in the room AND is still actively connected, block the new connection.
+      if (existingPlayer.connected && existingPlayer.id !== socket.id) {
+        socket.emit("error", `The nickname "${nickname}" is already taken in this room. Please choose another!`);
+        return;
+      }
+      
+      // If they were disconnected (connected === false), allow them to reclaim their spot
       existingPlayer.id = socket.id;
+      existingPlayer.connected = true; // Mark them back as active
     } else {
       if (room.gameStarted) {
         socket.emit("error", "Game already started. Cannot join.");
         return;
       }
-      // Initialize full player object
+      
+      // Max room capacity check (Guillotine maxes out at 5 players)
+      if (room.players.length >= 5) {
+        socket.emit("error", "This room is full! Max 5 players allowed.");
+        return;
+      }
+
+      // Initialize new player object safely
       room.players.push({ 
         id: socket.id, 
         nickname, 
@@ -246,16 +261,18 @@ io.on("connection", (socket) => {
     }
 
     socket.join(code);
-
     socket.emit("join-success", code);
-
-    if (activeRoomTimeouts.has(code)) {
-      console.log(`Player returning! Canceling deletion timeout for room: ${code}`);
-      clearTimeout(activeRoomTimeouts.get(code));
-      activeRoomTimeouts.delete(code);
+    
+    // Always broadcast the updated player states to everyone
+    if (room.gameStarted) {
+      io.to(code).emit("game-state-update", {
+        players: room.players,
+        ...room.gameState
+      });
+    } else {
+      io.to(code).emit("update-players", room.players); 
     }
     
-    io.to(code).emit("update-players", room.players); 
     console.log(`Player ${nickname} joined Room ${code}`);
   });
 

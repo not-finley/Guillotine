@@ -7,27 +7,31 @@ interface Player {
   nickname: string;
 }
 
-
 const Room = () => {
   const { roomCode } = useParams();
   const [players, setPlayers] = useState<Player[]>([]);
   const [copySuccess, setCopySuccess] = useState(false);
-  const [popupPosition, setPopupPosition] = useState({x:0, y:0});
+  const [popupPosition, setPopupPosition] = useState({ x: 0, y: 0 });
 
-  const [nickname, setNickname] = useState<string>("");
-  const [showModal, setShowModal] = useState<boolean>(true);
+  const [nickname, setNickname] = useState<string>(() => {
+    return localStorage.getItem("nickname") || "";
+  });
+  
+  const [showModal, setShowModal] = useState<boolean>(() => {
+    const savedRoomCode = localStorage.getItem("roomCode");
+    const savedNickname = localStorage.getItem("nickname");
+    return !(savedRoomCode && savedNickname && savedRoomCode === roomCode);
+  });
 
   const navigate = useNavigate();
 
+  // 1. Handle Structural Room Rejections
   useEffect(() => {
     socket.on("error", (errorMessage: string) => {
-      alert(errorMessage); // Notify the user cleanly
-      
-      // Clear localStorage so it doesn't loop try-reconnecting next time they load
+      alert(errorMessage);
       localStorage.removeItem("roomCode");
       localStorage.removeItem("nickname");
-      
-      navigate("/"); // Kick them back to safety
+      navigate("/");
     });
 
     return () => {
@@ -35,21 +39,34 @@ const Room = () => {
     };
   }, [navigate]);
 
+  // 2. RESTORED: Listen for players updating in the lobby roster
   useEffect(() => {
-    socket.on("update-players", (updatedPlayers) => {
-      setPlayers(updatedPlayers); // Update UI
+    socket.on("update-players", (updatedPlayers: Player[]) => {
+      setPlayers(updatedPlayers);
     });
 
     return () => {
-      socket.off("update-players"); // Cleanup on unmount
+      socket.off("update-players");
     };
+  }, []);
+
+  // 3. Handle Auto-Reconnection On Initial Component Mount
+  useEffect(() => {
+    const savedRoomCode = localStorage.getItem("roomCode");
+    const savedNickname = localStorage.getItem("nickname");
+
+    if (savedRoomCode && savedNickname && savedRoomCode === roomCode) {
+      console.log(`Reconnecting to room: ${savedRoomCode}`);
+      setNickname(savedNickname);
+      setShowModal(false);
+      socket.emit("join-room", { inputCode: savedRoomCode, nickname: savedNickname });
+    }
   }, [roomCode]);
 
+  // 4. Listen for the Game Initialization signal
   useEffect(() => {
-  // Listen for the state update instead of just 'start-game'
     socket.on("game-state-update", () => {
       console.log("Game state received, transitioning...");
-      // We pass the nickname in state as a backup to localStorage
       navigate(`/game/${roomCode}`, { state: { nickname } });
     });
 
@@ -58,25 +75,14 @@ const Room = () => {
     };
   }, [navigate, roomCode, nickname]);
 
-  useEffect(() => {
-    const savedRoomCode = localStorage.getItem("roomCode");
-    const savedNickname = localStorage.getItem("nickname");
-
-    if (savedRoomCode && savedNickname && savedRoomCode == roomCode) {
-      console.log(`Reconnecting to room: ${savedRoomCode}`);
-      setShowModal(false);
-      socket.emit("join-room", { inputCode: savedRoomCode, nickname: savedNickname });
-    }
-  }, [roomCode]);
-
   const handleJoin = () => {
-  if (!nickname.trim()) return;
-  const upperCode = roomCode ? roomCode.toUpperCase() : ""; 
-  localStorage.setItem("nickname", nickname);
-  localStorage.setItem("roomCode", upperCode);
-  setShowModal(false);
-  socket.emit("join-room", { inputCode: upperCode, nickname });
-};
+    if (!nickname.trim()) return;
+    const upperCode = roomCode ? roomCode.toUpperCase() : "";
+    localStorage.setItem("nickname", nickname);
+    localStorage.setItem("roomCode", upperCode);
+    setShowModal(false);
+    socket.emit("join-room", { inputCode: upperCode, nickname });
+  };
 
   const copyToClipboard = (event: MouseEvent<HTMLButtonElement>) => {
     if (roomCode) {
@@ -91,8 +97,8 @@ const Room = () => {
   };
 
   const startGame = () => {
-    socket.emit("start-game", {roomCode: roomCode});
-  }
+    socket.emit("start-game", { roomCode: roomCode });
+  };
 
   return (
     <div>
@@ -132,7 +138,7 @@ const Room = () => {
 
           <ul className="mt-4 space-y-2">
             {players.map((player: Player) => (
-              <li key={player.id} className={`p-2 rounded-lg shadow-md text-white ${player.nickname === localStorage.getItem("nickname") ? "bg-blue-500" : "bg-gray-700"}`}>
+              <li key={player.id} className={`p-2 rounded-lg shadow-md text-white ${player.nickname === nickname ? "bg-blue-500" : "bg-gray-700"}`}>
                 {player.nickname}
               </li>
             ))}
@@ -157,6 +163,6 @@ const Room = () => {
       </div>
     </div>
   );
-}
+};
 
-export default Room
+export default Room;
