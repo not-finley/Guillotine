@@ -15,7 +15,12 @@ const io = new Server(server, {
   } 
 });
 
+
+const activeRoomTimeouts = new Map();
 const ROOM_TIMEOUT = 30 * 60 * 1000;
+const MAX_GLOBAL_ROOMS = 500;
+const DISCONNECT_GRACE_PERIOD = 60 * 1000;
+const roomCreationCooldowns = new Map();
 
 
 const rooms = {};
@@ -175,7 +180,18 @@ io.on("connection", (socket) => {
   console.log("A player connected:", socket.id);
 
   socket.on("create-room", ({ nickname }) => {
-    const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase(); 
+    if (Object.keys(rooms).length >= MAX_GLOBAL_ROOMS) {
+      return socket.emit("error", "Server is at full capacity. Please try again later.");
+    }
+    const now = Date.now();
+    const lastCreate = roomCreationCooldowns.get(socket.id) || 0;
+    
+    if (now - lastCreate < 5000) {
+      return socket.emit("error", "You are creating rooms too fast!");
+    }
+    roomCreationCooldowns.set(socket.id, now);
+
+    const roomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     rooms[roomCode] = {
       players: [{ 
         id: socket.id, 
@@ -197,7 +213,7 @@ io.on("connection", (socket) => {
 
   socket.on("join-room", ({ inputCode, nickname }) => {
     if (!inputCode) return;
-    const code = inputCode.toUpperCase(); // We must use this 'code' everywhere below
+    const code = inputCode.toUpperCase(); 
 
     if (!rooms[code]) {
       socket.emit("error", "This room code does not exist. Double check your code or create a new room!");
@@ -232,6 +248,12 @@ io.on("connection", (socket) => {
     socket.join(code);
 
     socket.emit("join-success", code);
+
+    if (activeRoomTimeouts.has(code)) {
+      console.log(`Player returning! Canceling deletion timeout for room: ${code}`);
+      clearTimeout(activeRoomTimeouts.get(code));
+      activeRoomTimeouts.delete(code);
+    }
     
     io.to(code).emit("update-players", room.players); 
     console.log(`Player ${nickname} joined Room ${code}`);
@@ -482,6 +504,12 @@ io.on("connection", (socket) => {
   socket.on("request-game-state", ({ roomCode, nickname }) => {
     const code = roomCode?.toUpperCase();
     const room = rooms[code];
+
+    if (activeRoomTimeouts.has(code)) {
+      console.log(`Player requesting state! Canceling deletion timeout for room: ${code}`);
+      clearTimeout(activeRoomTimeouts.get(code));
+      activeRoomTimeouts.delete(code);
+    }
     
     console.log(`State requested for Room: ${code} by ${nickname}`);
 
@@ -506,6 +534,7 @@ io.on("connection", (socket) => {
       });
     } else {
       console.log(`Request failed. Room exists: ${!!room}, Started: ${room?.gameStarted}`);
+      socket.emit("error", "This game session has expired or does not exist.");
     }
   });
 
@@ -606,21 +635,53 @@ io.on("connection", (socket) => {
   })
 
   socket.on("disconnect", () => {
+    // 1. Clean up rate limiting maps
+    roomCreationCooldowns.delete(socket.id);
+
     for (const roomCode in rooms) {
       const room = rooms[roomCode];
-      const player = room.players.find(p => p.id === socket.id);
+      const playerIndex = room.players.findIndex(p => p.id === socket.id);
 
-      if (player) {
-        console.log(`${player.nickname} disconnected`);
-        player.connected = false;
+      if (playerIndex !== -1) {
+        const player = room.players[playerIndex];
+        console.log(`${player.nickname} disconnected from room ${roomCode}`);
 
         if (room.gameStarted) {
+          // ACTIVE GAME: Flag them as disconnected so they can reconnect later
+          player.connected = false;
+          
           io.to(roomCode).emit("game-state-update", {
             players: room.players,
             ...room.gameState
           });
         } else {
+          // NON-ACTIVE GAME: Completely remove them from the lobby roster
+          room.players.splice(playerIndex, 1);
           io.to(roomCode).emit("update-players", room.players);
+        }
+
+        // Check if anyone is still alive in this room
+        const totalConnected = room.players.filter(p => p.connected !== false).length;
+
+        if (totalConnected === 0) {
+          if (room.gameStarted) {
+            // ACTIVE GAME: Wait 60 seconds before deleting to allow re-connections
+            if (!activeRoomTimeouts.has(roomCode)) {
+              console.log(`Room ${roomCode} is empty but active. Starting ${DISCONNECT_GRACE_PERIOD / 1000}s deletion countdown...`);
+              
+              const timeoutId = setTimeout(() => {
+                console.log(`Grace period expired. Deleting active room: ${roomCode}`);
+                delete rooms[roomCode];
+                activeRoomTimeouts.delete(roomCode);
+              }, DISCONNECT_GRACE_PERIOD);
+
+              activeRoomTimeouts.set(roomCode, timeoutId);
+            }
+          } else {
+            // UNSTARTED GAME: No one cares, delete immediately
+            console.log(`Lobby room ${roomCode} is empty. Deleting immediately...`);
+            delete rooms[roomCode];
+          }
         }
       }
     }

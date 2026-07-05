@@ -75,6 +75,24 @@ const Game2 = () => {
     const logs: string[] = gameState?.actionLog || [];
     const latestAction = logs[0] || null;
 
+    useEffect(() => {
+        const handleRoomError = (errorMessage: string) => {
+            alert(errorMessage); // Alert the user why they are being booted
+            
+            // Clean up stale credentials so they don't get trapped in a redirect loop
+            localStorage.removeItem("roomCode");
+            localStorage.removeItem("nickname");
+            
+            navigate("/"); // Send them back to the landing screen
+        };
+
+        socket.on("error", handleRoomError);
+
+        return () => {
+            socket.off("error", handleRoomError);
+        };
+    }, [navigate]);
+
     // Handle Keyboard Navigation within modal focusing
     useEffect(() => {
         if (!focusCard || focusedHandIndex === -1) return;
